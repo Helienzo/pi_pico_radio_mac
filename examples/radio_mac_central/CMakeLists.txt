@@ -68,6 +68,20 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(static_queue)
 
 FetchContent_Declare(
+  static_pool
+  GIT_REPOSITORY https://github.com/Helienzo/static_pool.git
+  GIT_TAG        main
+)
+FetchContent_MakeAvailable(static_pool)
+
+FetchContent_Declare(
+  static_map
+  GIT_REPOSITORY https://github.com/Helienzo/static_map.git
+  GIT_TAG        main
+)
+FetchContent_MakeAvailable(static_map)
+
+FetchContent_Declare(
   rfm69_radio_hal
   GIT_REPOSITORY https://github.com/Helienzo/rfm69_radio_hal.git
   GIT_TAG        main
@@ -112,6 +126,8 @@ target_link_libraries(radio_mac_central
         pi_pico_gpio_hal
         pico_bootsel_button
         static_queue
+        static_pool
+        static_map
         rfm69_radio_hal
         pi_pico_radio_phy
         pi_pico_radio_mac

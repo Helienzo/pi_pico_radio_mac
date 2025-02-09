@@ -27,10 +27,25 @@
 */
 
 #include "mac_radio.h"
-#include "common.h"
 #include <string.h>
 
 #define DEFAULT_TTL 1
+
+#ifndef LOG
+#define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
+#endif
+
+#ifndef LOG_DEBUG
+#define LOG_DEBUG(f_, ...)//printf((f_), ##__VA_ARGS__)
+#endif
+
+#ifndef LOG_V_DEBUG
+#define LOG_V_DEBUG(f_, ...)// printf((f_), ##__VA_ARGS__)
+#endif
+
+#ifndef UNUSED
+#define UNUSED(x) (void)(x)
+#endif
 
 static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id);
 

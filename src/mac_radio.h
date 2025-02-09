@@ -35,6 +35,10 @@
 #include "static_pool.h"
 #include "static_map.h"
 
+#ifndef CONTAINER_OF
+#define CONTAINER_OF(ptr, type, member)	(type *)((char *)(ptr) - offsetof(type,member))
+#endif
+
 // Packet size and overhead
 #define MAC_RADIO_PKT_TYPE_SIZE   1
 #define MAC_RADIO_MSG_ID_SIZE     1
