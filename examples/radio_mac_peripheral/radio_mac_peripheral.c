@@ -26,7 +26,6 @@
 */
 
 // Configure device address
-#define RADIO_TARGET_ADDR     (0x01)
 #define RADIO_MY_ADDR         (0x02)
 #define RADIO_TX_BUFFER_SIZE  (128 + C_BUFFER_ARRAY_OVERHEAD) 
 #define PKT_LED               (9)

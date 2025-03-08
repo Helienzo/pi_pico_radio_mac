@@ -99,8 +99,9 @@ typedef enum {
     MAC_RADIO_SYNC_ACK_PKT,
     MAC_RADIO_ACK_PKT,
     MAC_RADIO_KEEP_ALIVE_PKT,
-    MAC_RADIO_RELIABLE_PKT,
-    MAC_RADIO_STREAM_PKT,
+    MAC_RADIO_RELIABLE_PKT,  // This packet expects an acknowlagement, times out if no ack is sent
+    MAC_RADIO_STREAM_PKT,    // This packet is not acknowlaged
+    MAC_RADIO_BROADCAST_PKT, // This packet is heard by any listener
     MAC_RADIO_CLOSE_PKT,
 } macRadioPacketType_t;
 

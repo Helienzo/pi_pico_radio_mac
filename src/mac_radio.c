@@ -444,6 +444,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
         case MAC_RADIO_KEEP_ALIVE_PKT:
         case MAC_RADIO_CLOSE_PKT:
         case MAC_RADIO_STREAM_PKT:
+        case MAC_RADIO_BROADCAST_PKT:
             // Check if it is an internal mac layer message.
             if (mac_interal) {
                 // Release the buffer used for this internal message
@@ -622,6 +623,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
 
     switch (pkt_type) {
         case MAC_RADIO_STREAM_PKT:
+        case MAC_RADIO_BROADCAST_PKT:
             if (inst->connections.conn_state != MAC_RADIO_CONNECTED) {
                 // Only manage these packets from the phy if we are connected
                 break;
@@ -741,6 +743,7 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
         case MAC_RADIO_KEEP_ALIVE_PKT:
         case MAC_RADIO_STREAM_PKT:
         case MAC_RADIO_CLOSE_PKT:
+        case MAC_RADIO_BROADCAST_PKT:
             break;
         default:
             return MAC_RADIO_INVALID_ERROR;
@@ -886,7 +889,6 @@ int32_t macRadioSetAutoMode(macRadio_t *inst) {
 
     // Randomly select if to start in cental or peripheral mode
     if (inst->auto_counter % 2 == 0) {
-        gpio_put(9, true);
         int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
         if (res != PHY_RADIO_SUCCESS) {
@@ -954,6 +956,7 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
             break;
         case MAC_RADIO_ACK_PKT:
         case MAC_RADIO_STREAM_PKT:
+        case MAC_RADIO_BROADCAST_PKT:
         break;
         default:
             return MAC_RADIO_INVALID_ERROR;
@@ -990,7 +993,16 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
     new_packet->addr       = inst->connections.target_addr;
     new_packet->pkt_buffer = packet->pkt_buffer;
     new_packet->slot       = inst->connections.my_tx_slot;
-    new_packet->type       = PHY_RADIO_PKT_DIRECT;
+
+    // Manage packet type
+    switch (packet->pkt_type) {
+        case MAC_RADIO_BROADCAST_PKT:
+            new_packet->type = PHY_RADIO_PKT_BROADCAST;
+            break;
+        default:
+            new_packet->type = PHY_RADIO_PKT_DIRECT;
+            break;
+    }
 
     // Send the packet, if the tx queue is full errors will be returned
     res = phyRadioSendOnSlot(&inst->phy_instance, new_packet);
