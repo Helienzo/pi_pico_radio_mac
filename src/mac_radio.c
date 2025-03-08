@@ -496,7 +496,7 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
     switch(inst->mode) {
         case MAC_RADIO_PERIPHERAL: {
             // Return the phy to scan mode
-            int32_t res = phyRadioSetScanMode(&inst->phy_instance);
+            int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
             if (res != PHY_RADIO_SUCCESS) {
                 return res;
             }
@@ -812,7 +812,7 @@ int32_t macRadioSetCentralMode(macRadio_t *inst) {
 }
 
 int32_t macRadioSetPeripheralMode(macRadio_t *inst) {
-    int32_t res = phyRadioSetScanMode(&inst->phy_instance);
+    int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
 
     if (res != PHY_RADIO_SUCCESS) {
         return res;
