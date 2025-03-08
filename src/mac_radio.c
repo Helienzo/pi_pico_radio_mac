@@ -28,6 +28,7 @@
 
 #include "mac_radio.h"
 #include <string.h>
+#include <stdlib.h>
 
 #define DEFAULT_TTL 1
 
@@ -46,6 +47,11 @@
 #ifndef UNUSED
 #define UNUSED(x) (void)(x)
 #endif
+
+#define MAC_RADIO_DEFAULT_NUM_BEACONS     (8)
+#define MAC_RADIO_MIN_NUM_BEACONS         (2)
+#define MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS (2*PHY_RADIO_SUPERFRAME_TIME_MS)
+#define MAC_RADIO_MIN_SCAN_TIMEOUT_MS     (PHY_RADIO_SUPERFRAME_TIME_MS)
 
 static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id);
 
@@ -146,6 +152,9 @@ static int32_t disconnectAndNotify(macRadio_t *inst) {
             .conn_state = MAC_RADIO_DISCONNECTED,
         };
 
+        // Re-Init the auto mode counter to a random value
+        inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
+
         // TODO manage connections
         return inst->interface->conn_cb(inst->interface, new_connection);
 }
@@ -162,7 +171,29 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
         if (cb_retval != MAC_RADIO_CB_SUCCESS) {
             return cb_retval;
         }
+
+        if (inst->mode == MAC_RADIO_AUTO_MODE) {
+            // If we are in auto mode return to scan on disconnect
+            int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
+            if (res != PHY_RADIO_SUCCESS) {
+                return res;
+            }
+        }
+    } else if (inst->mode == MAC_RADIO_AUTO_MODE && inst->connections.conn_state != MAC_RADIO_CONNECTED) {
+        // Check if it is time to switch mode
+        if (inst->auto_counter == 0) {
+            // Switch to scan mode
+            int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
+
+            if (res != PHY_RADIO_SUCCESS) {
+                return res;
+            }
+        } else {
+            // Decrement the scan counter
+            inst->auto_counter--;
+        }
     }
+
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
     return PHY_RADIO_CB_SUCCESS;
 }
@@ -212,6 +243,16 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
         if (cb_retval != MAC_RADIO_CB_SUCCESS) {
             return cb_retval;
         }
+    }
+
+    // Manage auto mode
+    if (inst->mode == MAC_RADIO_AUTO_MODE) {
+        // If we are in auto mode return to scan on disconnect
+        int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
+        if (res != PHY_RADIO_SUCCESS) {
+            return res;
+        }
+        return PHY_RADIO_CB_SUCCESS;
     }
 
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
@@ -274,10 +315,39 @@ static int32_t managePhyRxSlotStart(macRadio_t *inst, const phyRadioSyncState_t 
 
 static int32_t manageCentralConflictingSync(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // Switch mode, TODO perhpas we need to notify about this
-    inst->mode = MAC_RADIO_PERIPHERAL;
+    switch(inst->mode) {
+        case MAC_RADIO_CENTRAL:
+            // If I was configured to be central go to peripheral mode
+            inst->mode = MAC_RADIO_PERIPHERAL;
+            break;
+        case MAC_RADIO_PERIPHERAL:
+        case MAC_RADIO_AUTO_MODE:
+            break;
+        default:
+            break;
+    }
 
     // Inform phy to enter scan mode
     return PHY_RADIO_CB_SET_SCAN;
+}
+
+static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
+    // Check what mode we are in
+    if (inst->mode != MAC_RADIO_AUTO_MODE) {
+        // Nothing more to do, just return
+        return PHY_RADIO_CB_SUCCESS;
+    }
+
+    // Re-Init the auto mode counter to a random value
+    inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
+
+    // Switch to central mode
+    int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
+    if (res != PHY_RADIO_SUCCESS) {
+        return res;
+    }
+
+    return PHY_RADIO_CB_SUCCESS;
 }
 
 static int32_t phySyncStateCb(phyRadioInterface_t *interface, uint32_t sync_id, const phyRadioSyncState_t *sync_state) {
@@ -298,6 +368,8 @@ static int32_t phySyncStateCb(phyRadioInterface_t *interface, uint32_t sync_id, 
             return managePhyRxSlotStart(inst, sync_state);
         case PHY_RADIO_TX_SLOT_START:
            break;
+        case PHY_RADIO_SCAN_TIMEOUT:
+            return manageScanTimeout(inst, sync_state);
         default:
             // We should never end up here!
             return PHY_RADIO_CB_ERROR_INVALID;
@@ -439,6 +511,7 @@ static int32_t manageAckPkt(macRadio_t * inst, macRadioPktTrackItem_t * track_it
                 };
 
                 // Manage connections
+                LOG_DEBUG("Connected as PERIPHERAL\n");
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
             }
         } break; 
@@ -502,9 +575,16 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
             }
             LOG("Explicit disconnect requested\n");
         } break;
+        case MAC_RADIO_AUTO_MODE: {
+            // Restart scan mode
+            int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
+
+            if (res != PHY_RADIO_SUCCESS) {
+                return res;
+            }
+        } break;
         case MAC_RADIO_IDLE:
         case MAC_RADIO_CENTRAL:
-        case MAC_RADIO_AUTO_MODE:
         default:
             LOG("Unexpected CLOSE packet\n");
             break;
@@ -579,6 +659,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
             };
 
             // Manage connections
+            LOG_DEBUG("Connected as CENTRAL\n");
             cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
         } break;
         case MAC_RADIO_ACK_PKT: {
@@ -752,6 +833,10 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
 
     // Set the first msg ID to 0
     inst->msg_id = 0;
+    inst->auto_counter = 0;
+
+    // Seed the random generator with address and current time
+    srand(config.my_address + (unsigned)time_us_64());
 
     // Initialize the internal buffer pool, and fill it with available buffer items
     for (int32_t i = 0; i < MAC_RADIO_POOL_SIZE; i++) {
@@ -796,7 +881,26 @@ int32_t macRadioProcess(macRadio_t *inst) {
 }
 
 int32_t macRadioSetAutoMode(macRadio_t *inst) {
-    UNUSED(inst);
+    // Init the auto mode counter to a random value
+    inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
+
+    // Randomly select if to start in cental or peripheral mode
+    if (inst->auto_counter % 2 == 0) {
+        gpio_put(9, true);
+        int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
+
+        if (res != PHY_RADIO_SUCCESS) {
+            return res;
+        }
+    } else {
+        int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
+        if (res != PHY_RADIO_SUCCESS) {
+            return res;
+        }
+    }
+
+    inst->mode = MAC_RADIO_AUTO_MODE;
+
     return MAC_RADIO_SUCCESS;
 }
 
