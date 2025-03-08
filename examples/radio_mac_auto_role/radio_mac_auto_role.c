@@ -5,7 +5,9 @@
 
 /*
  This example demonstrates how to use the macRadio module in automatic role mode, the device will alternate
- between central and peripheral mode trying to find a peer to comunicate with.
+ between central and peripheral mode trying to find a peer to connect to and comunicate with.
+
+ NOTE: Using this code with a radio might not be legal. Allways follow your local radio spectrum regulations.
 
  This example should be used together with the peripheral example on two PICO's with a RFM69 radio.
 

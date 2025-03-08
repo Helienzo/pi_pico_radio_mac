@@ -4,12 +4,11 @@
 #include "pico_bootsel_button.h"
 
 /*
- This example demonstrates how to use the phyRadio module as a central device.
+ This example demonstrates how to use the macRadio module as a central device.
  The Central device send out a regular sync packet that provides a time reference for peripheral
  devices and allows them and the central to send data at the correct timing.
 
- The purpose of using TDD is to allow maximum throughput and minimizing collisions, by knowing when to send and when
- to listen the risk of colision is very small and all time can be utelized for data transfer.
+ The central device accepts incomming connections from peripheral devices.
 
  NOTE: Using this code with a radio might not be legal. Allways follow your local radio spectrum regulations.
 
@@ -17,12 +16,6 @@
 
  The example works best if a second LED is connected GPIO 9 to show when packets arrive. The PICO on board
  LED is used to show synchronization.
-
- The radio is configured in interrupt mode to notify about send complete, and packet available.
- how ever, the callbacks are not in ISR context, they are called through the proccess function.
-
- Note: The example uses the broadcast address to enable flashing multiple devices without changing addresses.
-       all devices will receive the packets sent. (Excluding the sender)
 */
 
 // Configure device address
