@@ -35,6 +35,10 @@
 #include "static_pool.h"
 #include "static_map.h"
 
+#ifndef CONTAINER_OF
+#define CONTAINER_OF(ptr, type, member)	(type *)((char *)(ptr) - offsetof(type,member))
+#endif
+
 // Packet size and overhead
 #define MAC_RADIO_PKT_TYPE_SIZE   1
 #define MAC_RADIO_MSG_ID_SIZE     1
@@ -95,8 +99,9 @@ typedef enum {
     MAC_RADIO_SYNC_ACK_PKT,
     MAC_RADIO_ACK_PKT,
     MAC_RADIO_KEEP_ALIVE_PKT,
-    MAC_RADIO_RELIABLE_PKT,
-    MAC_RADIO_STREAM_PKT,
+    MAC_RADIO_RELIABLE_PKT,  // This packet expects an acknowlagement, times out if no ack is sent
+    MAC_RADIO_STREAM_PKT,    // This packet is not acknowlaged
+    MAC_RADIO_BROADCAST_PKT, // This packet is heard by any listener
     MAC_RADIO_CLOSE_PKT,
 } macRadioPacketType_t;
 
@@ -164,6 +169,7 @@ typedef struct {
     // Mode and configuration
     macRadioConfig_t current_config;
     macRadioMode_t   mode;
+    uint8_t          auto_counter;
 
     // Connection management
     uint8_t        central_addr;
@@ -183,7 +189,7 @@ typedef struct {
     macRadioPktTrackItem_t   _track_map_array[MAC_RADIO_MAP_SIZE];
 
     // External Packet management
-    uint8_t            msg_id;
+    uint8_t               msg_id;
     macRadioPktPoolItem_t _pkt_pool[MAC_RADIO_POOL_SIZE];
     staticPoolList_t      _pool_array[MAC_RADIO_POOL_SIZE];
     staticPool_t          packet_pool;
