@@ -128,6 +128,8 @@ struct macRadioPacket {
     uint32_t   conn_id;
     uint32_t   pkt_type;
     cBuffer_t *pkt_buffer;
+    uint16_t   user_id; // This field can be used by the higher layer to identify the packet
+    uint16_t   reserved_space; // Unused field reserved for future use
 };
 
 // Definition of interface

@@ -429,15 +429,16 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
                         return res;
                     }
                 }
+            } else {
+                // if the send result was successfull, set this packet as sent
+                track_item = findTrackedMacPkt(&inst->track_map, msg_id);
+                if (track_item == NULL) {
+                    // This is a fatal error, something is very bad
+                    LOG("Sent map error %i %u %i\n", msg_id, inst, result);
+                    return MAC_RADIO_MAP_ERROR;
+                }
+                track_item->sent = true;
             }
-
-            // if the send result was successfull, set this packet as sent
-            track_item = findTrackedMacPkt(&inst->track_map, msg_id);
-            if (track_item == NULL) {
-                // This is a fatal error, something is very bad
-                return MAC_RADIO_MAP_ERROR;
-            }
-            track_item->sent = true;
         } break;
         case MAC_RADIO_SYNC_PKT:
         case MAC_RADIO_ACK_PKT:
@@ -478,8 +479,8 @@ static int32_t manageAckPkt(macRadio_t * inst, macRadioPktTrackItem_t * track_it
     if (track_item == NULL) {
         // This is an acknowlagement sent on an unkonwn msg_id
         LOG("BAD ACK, unknown response\n");
-        // TODO this is not actually an error but for now we need to know
-        return MAC_RADIO_UNKONWN_ACK;
+        // Most likely this is a message that has allready timed out
+        return MAC_RADIO_CB_SUCCESS;
     }
 
     int32_t cb_retval = MAC_RADIO_CB_SUCCESS;
