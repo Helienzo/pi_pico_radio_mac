@@ -40,8 +40,8 @@
 #endif
 
 // Packet size and overhead
-#define MAC_RADIO_PKT_TYPE_SIZE   1
-#define MAC_RADIO_MSG_ID_SIZE     1
+#define MAC_RADIO_PKT_TYPE_SIZE   (1)
+#define MAC_RADIO_MSG_ID_SIZE     (1)
 #define MAC_RADIO_OVERHEAD_SIZE   (MAC_RADIO_PKT_TYPE_SIZE + MAC_RADIO_MSG_ID_SIZE)
 #define MAC_RADIO_MAX_PACKET_SIZE (PHY_RADIO_MAX_PACKET_SIZE - MAC_RADIO_OVERHEAD_SIZE)
 
@@ -50,8 +50,13 @@
 #define MAC_RADIO_INTERNAL_MSG_BUFFER_SIZE (MAC_RADIO_INTERNAL_MSG_SIZE + PHY_RADIO_TOTAL_OVERHEAD_SIZE + C_BUFFER_ARRAY_OVERHEAD)
 
 // Packet management
-#define MAC_RADIO_POOL_SIZE                5
-#define MAC_RADIO_MAP_SIZE                 5
+#ifndef MAC_RADIO_POOL_SIZE
+#define MAC_RADIO_POOL_SIZE (5)
+#endif /* MAC_RADIO_POOL_SIZE */
+
+#ifndef MAC_RADIO_MAP_SIZE
+#define MAC_RADIO_MAP_SIZE (5)
+#endif /* MAC_RADIO_MAP_SIZE */
 
 // Max Number of missed keep alive from peripheral before a disconnect is triggered
 #define MAC_RADIO_SYNC_TIMEOUT (PHY_RADIO_SYNC_TIMEOUT) // Use the same as Peripheral timeout
@@ -123,6 +128,8 @@ struct macRadioPacket {
     uint32_t   conn_id;
     uint32_t   pkt_type;
     cBuffer_t *pkt_buffer;
+    uint16_t   user_id; // This field can be used by the higher layer to identify the packet
+    uint16_t   reserved_space; // Unused field reserved for future use
 };
 
 // Definition of interface
