@@ -880,6 +880,14 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
     return MAC_RADIO_SUCCESS;
 }
 
+int32_t macRadioEventInQueue(macRadio_t *inst) {
+    if (phyRadioEventInQueue(&inst->phy_instance) > 0) {
+        return MAC_RADIO_INTERRUPT_IN_QUEUE;
+    }
+
+    return MAC_RADIO_SUCCESS;
+}
+
 int32_t macRadioProcess(macRadio_t *inst) {
     return phyRadioProcess(&inst->phy_instance);
 }

@@ -62,7 +62,8 @@
 #define MAC_RADIO_SYNC_TIMEOUT (PHY_RADIO_SYNC_TIMEOUT) // Use the same as Peripheral timeout
 
 typedef enum {
-    MAC_RADIO_SUCCESS,
+    MAC_RADIO_INTERRUPT_IN_QUEUE = 1,
+    MAC_RADIO_SUCCESS            = 0,
     MAC_RADIO_NULL_ERROR    = -30001,
     MAC_RADIO_INVALID_ERROR = -30002,
     MAC_RADIO_POOL_ERROR    = -30003,
@@ -223,6 +224,13 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
  * Returns: macRadioErr_t
  */
 int32_t macRadioProcess(macRadio_t *inst);
+
+/**
+ * Check if the mac radio needs to be processed
+ * Input: macRadio instance
+ * Returns: macRadioErr_t
+ */
+int32_t macRadioEventInQueue(macRadio_t *inst);
 
 /**
  * Set the radio in auto mode to scan for available central devices or
