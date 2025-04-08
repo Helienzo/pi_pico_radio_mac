@@ -219,6 +219,13 @@ typedef struct {
 int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterface_t *interface);
 
 /**
+ * Deinit this module.
+ * Input: Pointer to mac radio instance
+ * Returns: macRadioErr_t
+ */
+int32_t macRadioDeInit(macRadio_t *inst);
+
+/**
  * Process the mac radio
  * Input: macRadio instance
  * Returns: macRadioErr_t

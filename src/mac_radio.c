@@ -144,19 +144,26 @@ static uint32_t unTrackPktByKey(staticMap_t *map, uint32_t key) {
 }
 
 static int32_t disconnectAndNotify(macRadio_t *inst) {
-        inst->connections.conn_state = MAC_RADIO_DISCONNECTED;
+    // Check if we are allready disconnected
+    if (inst->connections.conn_state == MAC_RADIO_DISCONNECTED) {
+        return MAC_RADIO_SUCCESS;
+    }
 
-        // Trigger connection Callback
-        macRadioConn_t new_connection = {
-            .conn_id = 0, // TODO manage handout of connID's
-            .conn_state = MAC_RADIO_DISCONNECTED,
-        };
+    // TODO should we cleanup the unsent packages?
 
-        // Re-Init the auto mode counter to a random value
-        inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
+    inst->connections.conn_state = MAC_RADIO_DISCONNECTED;
 
-        // TODO manage connections
-        return inst->interface->conn_cb(inst->interface, new_connection);
+    // Trigger connection Callback
+    macRadioConn_t new_connection = {
+        .conn_id = 0, // TODO manage handout of connID's
+        .conn_state = MAC_RADIO_DISCONNECTED,
+    };
+
+    // Re-Init the auto mode counter to a random value
+    inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
+
+    // TODO manage connections
+    return inst->interface->conn_cb(inst->interface, new_connection);
 }
 
 static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
@@ -314,17 +321,21 @@ static int32_t managePhyRxSlotStart(macRadio_t *inst, const phyRadioSyncState_t 
 }
 
 static int32_t manageCentralConflictingSync(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
-    // Switch mode, TODO perhpas we need to notify about this
+    // TODO We could decide more in detail how we should manage conflicting syncs, but for now
+    // we allways disconnect and go to scan mode.
     switch(inst->mode) {
         case MAC_RADIO_CENTRAL:
-            // If I was configured to be central go to peripheral mode
-            inst->mode = MAC_RADIO_PERIPHERAL;
-            break;
         case MAC_RADIO_PERIPHERAL:
         case MAC_RADIO_AUTO_MODE:
             break;
         default:
             break;
+    }
+
+    // Make sure to trigger a disconnect if we where connected
+    int32_t cb_retval = disconnectAndNotify(inst);
+    if (cb_retval != MAC_RADIO_CB_SUCCESS) {
+        return cb_retval;
     }
 
     // Inform phy to enter scan mode
@@ -402,7 +413,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
     // Return the phy packet to the pool
     int32_t res = releasePacketByItem(inst, packet_item);
 
-    if (res != MAC_RADIO_SUCCESS) {
+    if (res != STATIC_POOL_SUCCESS) {
         // If this fails something is very broken
         LOG("Failed to return packet to POOL\n");
         return inst->interface->sent_cb(inst->interface, mac_pkt, MAC_RADIO_POOL_ERROR);
@@ -423,7 +434,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
 
                 if (mac_interal) {
                     // Release the buffer used for this internal message
-                    if ((res = releaseBufferByBuf(inst, packet->pkt_buffer) != STATIC_POOL_SUCCESS)) {
+                    if ((res = releaseBufferByBuf(inst, packet->pkt_buffer)) != STATIC_POOL_SUCCESS) {
                         // This is a fatal error, something is very bad
                         LOG("Failed to return buffer to POOL\n");
                         return res;
@@ -449,7 +460,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
             // Check if it is an internal mac layer message.
             if (mac_interal) {
                 // Release the buffer used for this internal message
-                if ((res = releaseBufferByBuf(inst, packet->pkt_buffer) != STATIC_POOL_SUCCESS)) {
+                if ((res = releaseBufferByBuf(inst, packet->pkt_buffer)) != STATIC_POOL_SUCCESS) {
                     // Fatal, this would be very bad
                     LOG("Failed to return buffer to POOL\n");
                     return res;
@@ -498,7 +509,7 @@ static int32_t manageAckPkt(macRadio_t * inst, macRadioPktTrackItem_t * track_it
             }
 
             // Remove the packet from the map
-            if ((res = unTrackMacPktByItem(&inst->track_map, track_item))!= STATIC_MAP_SUCCESS) {
+            if ((res = unTrackMacPktByItem(&inst->track_map, track_item)) != STATIC_MAP_SUCCESS) {
                 return res;
             }
 
@@ -684,6 +695,8 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
             break;
         default:
             // No other packet is currently supported
+            // It would indicate that the contents of the packet was corrupt or mangled by lower layers
+            LOG("Invalid packet type %u\n", pkt_type);
             return PHY_RADIO_CB_ERROR;
     }
 
@@ -785,16 +798,16 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
     if (res != PHY_RADIO_SUCCESS) {
         // Release all allocated resources
         int32_t result = MAC_RADIO_SUCCESS;
-        if ((result = releasePacketByPhy(inst, new_packet)) != MAC_RADIO_SUCCESS) {
+        if ((result = releasePacketByPhy(inst, new_packet)) != STATIC_POOL_SUCCESS) {
             return MAC_RADIO_BUFFER_ERROR;
         }
 
-        if ((result = releaseBufferByMac(inst, &buffer_item->mac_pkt))) {
+        if ((result = releaseBufferByMac(inst, &buffer_item->mac_pkt)) != STATIC_POOL_SUCCESS) {
             return MAC_RADIO_BUFFER_ERROR;
         }
 
         if (track_item != NULL) {
-            if ((result = unTrackMacPktByItem(&inst->track_map, track_item))) {
+            if ((result = unTrackMacPktByItem(&inst->track_map, track_item)) != STATIC_POOL_SUCCESS) {
                 return MAC_RADIO_MAP_ERROR;
             }
         }
@@ -880,6 +893,10 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
     return MAC_RADIO_SUCCESS;
 }
 
+int32_t macRadioDeInit(macRadio_t *inst) {
+    return MAC_RADIO_SUCCESS;
+}
+
 int32_t macRadioEventInQueue(macRadio_t *inst) {
     if (phyRadioEventInQueue(&inst->phy_instance) > 0) {
         return MAC_RADIO_INTERRUPT_IN_QUEUE;
@@ -893,6 +910,22 @@ int32_t macRadioProcess(macRadio_t *inst) {
 }
 
 int32_t macRadioSetAutoMode(macRadio_t *inst) {
+    // Manage the current mode
+    switch(inst->mode) {
+        case MAC_RADIO_CENTRAL:
+        case MAC_RADIO_PERIPHERAL: {
+            // Make sure to trigger a disconnect if we are connected
+            int32_t cb_retval = disconnectAndNotify(inst);
+            if (cb_retval != MAC_RADIO_CB_SUCCESS) {
+                return cb_retval;
+            }
+        } break;
+        case MAC_RADIO_AUTO_MODE:
+            return MAC_RADIO_SUCCESS;
+        default:
+            break;
+    }
+
     // Init the auto mode counter to a random value
     inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
 
@@ -916,6 +949,22 @@ int32_t macRadioSetAutoMode(macRadio_t *inst) {
 }
 
 int32_t macRadioSetCentralMode(macRadio_t *inst) {
+    // Manage the current mode
+    switch(inst->mode) {
+        case MAC_RADIO_PERIPHERAL:
+        case MAC_RADIO_AUTO_MODE: {
+            // Make sure to trigger a disconnect if we are connected
+            int32_t cb_retval = disconnectAndNotify(inst);
+            if (cb_retval != MAC_RADIO_CB_SUCCESS) {
+                return cb_retval;
+            }
+        } break;
+        case MAC_RADIO_CENTRAL:
+            return MAC_RADIO_SUCCESS;
+        default:
+            break;
+    }
+
     int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
     if (res != PHY_RADIO_SUCCESS) {
         return res;
@@ -927,6 +976,22 @@ int32_t macRadioSetCentralMode(macRadio_t *inst) {
 }
 
 int32_t macRadioSetPeripheralMode(macRadio_t *inst) {
+    // Manage the current mode
+    switch(inst->mode) {
+        case MAC_RADIO_CENTRAL:
+        case MAC_RADIO_AUTO_MODE: {
+            // Make sure to trigger a disconnect if we are connected
+            int32_t cb_retval = disconnectAndNotify(inst);
+            if (cb_retval != MAC_RADIO_CB_SUCCESS) {
+                return cb_retval;
+            }
+        } break;
+        case MAC_RADIO_PERIPHERAL:
+            return MAC_RADIO_SUCCESS;
+        default:
+            break;
+    }
+
     int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
 
     if (res != PHY_RADIO_SUCCESS) {
@@ -1018,12 +1083,12 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
     if (res != PHY_RADIO_SUCCESS) {
         // Release all allocated resources
         int32_t result = MAC_RADIO_SUCCESS;
-        if ((result = releasePacketByPhy(inst, new_packet)) != MAC_RADIO_SUCCESS) {
+        if ((result = releasePacketByPhy(inst, new_packet)) != STATIC_POOL_SUCCESS) {
             return MAC_RADIO_BUFFER_ERROR;
         }
 
         if (track_item != NULL) {
-            if ((result = unTrackMacPktByItem(&inst->track_map, track_item))) {
+            if ((result = unTrackMacPktByItem(&inst->track_map, track_item)) != STATIC_MAP_SUCCESS) {
                 return MAC_RADIO_MAP_ERROR;
             }
         }
