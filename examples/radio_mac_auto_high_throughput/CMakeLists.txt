@@ -28,7 +28,7 @@ set(PICO_BOARD pico2 CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(radio_mac_auto_role C CXX ASM)
+project(radio_mac_auto_high_throughput C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -100,26 +100,38 @@ add_subdirectory(${MODULE_PATH} libs/pi_pico_radio_mac)
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(radio_mac_auto_role radio_mac_auto_role.c )
+add_executable(radio_mac_auto_high_throughput radio_mac_auto_high_throughput.c )
 
-pico_set_program_name(radio_mac_auto_role "radio_mac_auto_role")
-pico_set_program_version(radio_mac_auto_role "0.1")
+pico_set_program_name(radio_mac_auto_high_throughput "radio_mac_auto_high_throughput")
+pico_set_program_version(radio_mac_auto_high_throughput "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(radio_mac_auto_role 1)
-pico_enable_stdio_usb(radio_mac_auto_role 1)
+pico_enable_stdio_uart(radio_mac_auto_high_throughput 1)
+pico_enable_stdio_usb(radio_mac_auto_high_throughput 1)
+
+# Set phy and hal library configurations
+target_compile_definitions(radio_mac_auto_high_throughput PRIVATE
+    HAL_RADIO_SLOT_GPIO_DEBUG=1
+    HAL_RADIO_MAX_BUFFER_SIZE=255
+    PHY_RADIO_SLOT_TIME_US=8000
+    PHY_RADIO_GUARD_TIME_US=500
+    PHY_RADIO_PACKET_GUARD_TIME_US=20
+    PHY_RADIO_SUPERFRAME_LEN=3
+    PHY_RADIO_SYNC_TIMEOUT=9
+    PHY_RADIO_BIT_RATE=HAL_RADIO_BITRATE_250
+)
 
 # Add the standard library to the build
-target_link_libraries(radio_mac_auto_role
+target_link_libraries(radio_mac_auto_high_throughput
         pico_stdlib)
 
 # Add the standard include files to the build
-target_include_directories(radio_mac_auto_role PRIVATE
+target_include_directories(radio_mac_auto_high_throughput PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
 # Add any user requested libraries
-target_link_libraries(radio_mac_auto_role 
+target_link_libraries(radio_mac_auto_high_throughput 
         hardware_spi
         rp2x_rfm69_lib
         c_buffer
@@ -133,4 +145,8 @@ target_link_libraries(radio_mac_auto_role
         pi_pico_radio_mac
         )
 
-pico_add_extra_outputs(radio_mac_auto_role)
+if (PICO_CYW43_SUPPORTED)
+    target_link_libraries(radio_mac_auto_high_throughput pico_cyw43_arch_none)
+endif()
+    
+pico_add_extra_outputs(radio_mac_auto_high_throughput)

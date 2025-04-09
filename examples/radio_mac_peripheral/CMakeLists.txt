@@ -35,7 +35,7 @@ pico_sdk_init()
 FetchContent_Declare(
   rp2x_rfm69
   GIT_REPOSITORY https://github.com/Helienzo/rp2x_rfm69.git
-  GIT_TAG        main
+  GIT_TAG        feature/add_get_helpers
 )
 FetchContent_MakeAvailable(rp2x_rfm69)
 

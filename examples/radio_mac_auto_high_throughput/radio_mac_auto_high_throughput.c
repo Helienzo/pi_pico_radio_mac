@@ -7,9 +7,11 @@
  This example demonstrates how to use the macRadio module in automatic role mode, the device will alternate
  between central and peripheral mode trying to find a peer to connect to and comunicate with.
 
+ The button activates/deactivates continous transmission of data to the other device with maximum throughput
+
  NOTE: Using this code with a radio might not be legal. Allways follow your local radio spectrum regulations.
 
- This example should be used two with PICO's with a RFM69 radio.
+ This example should be used with two PICO's with a RFM69 radio.
 
  The example works best if a second LED is connected GPIO 9 to show when packets arrive. The PICO on board
  LED is used to show connection state.
@@ -20,15 +22,28 @@
 */
 
 // Configure device address
-#define RADIO_MY_ADDR         (0x01)
-#define RADIO_TX_BUFFER_SIZE  (128 + C_BUFFER_ARRAY_OVERHEAD) 
-#define PKT_LED               (9)
+#define RADIO_MY_ADDR             (0x01)
+#define RADIO_TX_BUFFER_SIZE      (255 + C_BUFFER_ARRAY_OVERHEAD) 
+#define PKT_LED                   (9)
+#define PRINT_THROUGHPUT_INTERVAL (25000)
 
 #ifndef LOG
 #define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
 #endif
 
-uint8_t msg[] = {'H', 'e', 'l', 'l', 'o', '!'};
+// Short message
+//static uint8_t msg[] = {'H', 'e', 'l', 'l', 'o', '!'};
+
+// Large message
+static uint8_t msg[] = {
+    '1', ',', ' ', '2', ',', ' ', '3', ',', ' ', '4', ',', ' ', '5', ',', ' ',
+    '6', ',', ' ', '7', ',', ' ', '8', ',', ' ', '9', ',', ' ', '1', '0', ',', ' ',
+    '1', '1', ',', ' ', '1', '2', ',', ' ', '1', '3', ',', ' ', '1', '4', ',', ' ',
+    '1', '5', ',', ' ', '1', '6', ',', ' ', '1', '7', ',', ' ', '1', '8', ',', ' ',
+    '1', '9', ',', ' ', '2', '0', ',', ' ', '2', '1', ',', ' ', '2', '2', ',', ' ',
+    '2', '3', ',', ' ', '2', '4', ',', ' ', '2', '5', ',', ' ', '2', '6', ',', ' ',
+    '2', '7', ',', ' ', '2', '8', ',', ' ', '2', '9', ',', ' ', '3', '0',
+    '3', '1', ',', ' ', '3', '2'};
 
 typedef struct mainCtx {
     // Radio
@@ -43,11 +58,17 @@ typedef struct mainCtx {
     macRadioPacket_t packet;
     uint8_t          tx_package_buf[RADIO_TX_BUFFER_SIZE];
     cBuffer_t        tx_buffer;
-    bool             packet_available;
+    bool             packet_available; // Used to keep track of when a packet is in active transfer
+    bool             send_packets; // Used to keep track of packet transfer active
 
     // LED management
     bool led_state;
     bool test_led_state;
+
+    // Measure througphut and processor utilization
+    uint64_t last_packet_timestamp_us;
+    float    ema_bitrate_bps;
+    float    radio_time_percentage;
 } mainCtx_t;
 
 // Local variables
@@ -83,17 +104,17 @@ void pico_set_led(bool led_on) {
 #endif
 }
 
-void buttonEventCb(picoBootSelButtonInterface_t *interface, picoBootSelButtonEvent_t event) {
-    mainCtx_t* inst = CONTAINER_OF(interface, mainCtx_t, btn_interface);
-
-    // Check if the packet is available
+static void sendPackage(mainCtx_t* inst) {
     if (!inst->packet_available) {
-        // Just ignore the button press if not available
         return;
     }
+    int32_t res = cBufferClear(inst->packet.pkt_buffer);
+    if (res != C_BUFFER_SUCCESS) {
+        LOG("RADIO SEND FAILED! %i\n", res);
+        device_error();
+    }
 
-    // Write the new message to the packet buffer
-    int32_t res = cBufferPrepend(inst->packet.pkt_buffer, msg, sizeof(msg));
+    res = cBufferPrepend(inst->packet.pkt_buffer, msg, sizeof(msg));
     if (res != sizeof(msg)) {
         LOG("RADIO SEND FAILED! %i\n", res);
         device_error();
@@ -114,8 +135,65 @@ void buttonEventCb(picoBootSelButtonInterface_t *interface, picoBootSelButtonEve
     inst->packet_available = false;
 }
 
+static void calculateBitrate(mainCtx_t* inst, uint32_t num_bytes)
+{
+    // Choose a smoothing factor: 0.0 < ALPHA <= 1.0.
+    // Higher ALPHA -> less smoothing (reacts faster).
+    // Lower ALPHA -> more smoothing (reacts slower).
+    const float ALPHA = 0.05;
+
+    uint64_t now_us = to_us_since_boot(get_absolute_time());
+
+    // If this is truly the first packet, just record the time and skip
+    if (inst->last_packet_timestamp_us == 0) {
+        inst->last_packet_timestamp_us = now_us;
+        inst->ema_bitrate_bps = 0.0;
+        return;
+    }
+
+    // Time in seconds since last packet
+    float delta_sec = (float)(now_us - inst->last_packet_timestamp_us) / 1000000.0;
+
+    // Update the timestamp for next round
+    inst->last_packet_timestamp_us = now_us;
+
+    // Guard against zero or negative intervals
+    if (delta_sec <= 0.0) {
+        return;
+    }
+
+    // Convert the new packet size to bits
+    float bits = (float)num_bytes;
+
+    // Instantaneous rate = bits / elapsed time
+    float instantaneous_bps = bits / delta_sec;
+
+    // Exponential moving average update
+    inst->ema_bitrate_bps = ALPHA * instantaneous_bps + (1.0 - ALPHA) * inst->ema_bitrate_bps;
+}
+
+static void buttonEventCb(picoBootSelButtonInterface_t *interface, picoBootSelButtonEvent_t event) {
+    if (interface == NULL) {
+        LOG("INTERFACE IS NULL!!\n");
+        device_error();
+    }
+
+    mainCtx_t* inst = CONTAINER_OF(interface, mainCtx_t, btn_interface);
+
+    // Start or stop sending packets
+    inst->send_packets = !inst->send_packets;
+    if (inst->send_packets) {
+        sendPackage(inst);
+    }
+}
+
 // This callback gets called when connection state changes
 int32_t connStateCb(macRadioInterface_t *interface, macRadioConn_t conn_state) {
+    if (interface == NULL) {
+        LOG("INTERFACE IS NULL!!\n");
+        device_error();
+    }
+
     mainCtx_t* inst = CONTAINER_OF(interface, mainCtx_t, mac_interface);
 
     // Check the updated connection state
@@ -123,6 +201,11 @@ int32_t connStateCb(macRadioInterface_t *interface, macRadioConn_t conn_state) {
         case MAC_RADIO_CONNECTED:
             LOG("CONNECTED\n");
             inst->led_state = true;
+
+            // Start/keep sending packets on connections
+            if (inst->send_packets) {
+                sendPackage(inst);
+            }
             break;
         case MAC_RADIO_DISCONNECTED:
             LOG("DISCONNECTED\n");
@@ -140,6 +223,11 @@ int32_t connStateCb(macRadioInterface_t *interface, macRadioConn_t conn_state) {
 
 // This callback gets called when a packet has been successfully sent, or errors occured
 int32_t packageSent(macRadioInterface_t *interface, macRadioPacket_t *pkt, macRadioErr_t result) {
+    if (pkt == NULL || interface == NULL) {
+        LOG("PACKET OR INTERFACE IS NULL!\n");
+        device_error();
+    }
+
     mainCtx_t* inst = CONTAINER_OF(interface, mainCtx_t, mac_interface);
 
     // Check if the packet sent is a reliable packet, those are occupied until a response or timeout
@@ -152,14 +240,18 @@ int32_t packageSent(macRadioInterface_t *interface, macRadioPacket_t *pkt, macRa
     if (result == PHY_RADIO_SEND_FAIL) {
         // An error will allways release the packet
         inst->packet_available = true;
-        // This is ok I think
         LOG("SEND FAILED\n");
-        return MAC_RADIO_CB_SUCCESS;
-    }
 
-    // All other errors are potentially fatal, this will trigger a fail result in process.
-    if (result != MAC_RADIO_SUCCESS) {
-        return result;
+        // Try to resend
+        if (inst->send_packets) {
+            sendPackage(inst);
+        }
+
+        return MAC_RADIO_CB_SUCCESS;
+    } else if (result != MAC_RADIO_SUCCESS) {
+        // Fatal error
+        LOG("SEND FAILED %i\n", result);
+        device_error();
     }
 
     return MAC_RADIO_CB_SUCCESS;
@@ -167,6 +259,11 @@ int32_t packageSent(macRadioInterface_t *interface, macRadioPacket_t *pkt, macRa
 
 // This callback gets called when a new packet has arrived
 int32_t packageCallback(macRadioInterface_t *interface, macRadioPacket_t *packet) {
+    if (packet == NULL || interface == NULL) {
+        LOG("PACKET OR INTERFACE IS NULL!\n");
+        device_error();
+    }
+
     mainCtx_t* inst = CONTAINER_OF(interface, mainCtx_t, mac_interface);
 
     inst->test_led_state = !inst->test_led_state;
@@ -181,19 +278,29 @@ int32_t packageCallback(macRadioInterface_t *interface, macRadioPacket_t *packet
         return result;
     }
 
+    /* 
+    // Print packet size and contents to console
     LOG("%i bytes received.\n", result);
 
-    // Print out payload
     LOG("Payload: ");
     for (int32_t i = 0; i < result; i++) {
         LOG("%c", cBufferReadByte(packet->pkt_buffer));
     }
     LOG("\n\n");
+    */
+
+    calculateBitrate(inst, result);
+
     return MAC_RADIO_CB_SUCCESS;
 }
 
 // This callback gets called when a packet has been acked, timed out or other response.
 static int32_t respCb(macRadioInterface_t *interface, macRadioPacket_t *packet, macRadioPacket_t *response, macRadioErr_t result) {
+    if (interface == NULL || packet == NULL) {
+        LOG("INTERFACE OR PACKET IS NULL! %u %u\n", interface, packet);
+        device_error();
+    }
+
     mainCtx_t* inst = CONTAINER_OF(interface, mainCtx_t, mac_interface);
 
     if (result == MAC_RADIO_PKT_TIMEOUT) {
@@ -205,7 +312,13 @@ static int32_t respCb(macRadioInterface_t *interface, macRadioPacket_t *packet, 
         return result;
     }
 
+    // Packet send
     inst->packet_available = true;
+
+    // Send the next package
+    if (inst->send_packets) {
+        sendPackage(inst);
+    }
 
     return MAC_RADIO_CB_SUCCESS;
 }
@@ -216,6 +329,17 @@ int main() {
     halGpioInit();
     int rc = pico_led_init();
     hard_assert(rc == PICO_OK);
+
+    // Initializ main parameters
+    main_instance.packet_available = true;
+    main_instance.send_packets     = false;
+    main_instance.led_state      = false;
+    main_instance.test_led_state = false;
+
+    // Initialize throughput measurement variables
+    main_instance.last_packet_timestamp_us = 0;
+    main_instance.ema_bitrate_bps          = 0.0;
+    main_instance.radio_time_percentage    = 0.0;
 
     // Prepare bootsel button
     main_instance.btn_interface.event_cb = buttonEventCb;
@@ -243,11 +367,7 @@ int main() {
         device_error();
     }
 
-    // Init the LED states
-    main_instance.led_state      = false;
-    main_instance.test_led_state = false;
-
-    // Create a message
+    // Create a radio message buffer
     if ((res = cBufferInit(&main_instance.tx_buffer, main_instance.tx_package_buf, RADIO_TX_BUFFER_SIZE)) != C_BUFFER_SUCCESS) {
         LOG("RADIO INIT FAILED!\n");
         device_error();
@@ -255,9 +375,8 @@ int main() {
 
     // Prepare packet
     main_instance.packet.pkt_buffer = &main_instance.tx_buffer;
-    main_instance.packet.pkt_type   = MAC_RADIO_BROADCAST_PKT;
+    main_instance.packet.pkt_type   = MAC_RADIO_RELIABLE_PKT;
     main_instance.packet.conn_id    = 0; // TODO temporary
-    main_instance.packet_available = true;
 
     // Configure the radio mode
     res = macRadioSetAutoMode(&main_instance.mac_radio);
@@ -267,13 +386,32 @@ int main() {
         device_error();
     }
 
+    uint64_t loop_elapsed = 0;
+    uint32_t count = 0;
     // Process forever
     while (true) {
-        // Process the radio
-        res = macRadioProcess(&main_instance.mac_radio);
-        if (res != MAC_RADIO_SUCCESS) {
-            LOG("RADIO PROCESS FAILED! %i\n", res);
-            device_error();
+        // Mark the start of this loop
+        uint64_t loop_start_us = to_us_since_boot(get_absolute_time());
+
+        // Check if the radio has pending events
+        bool has_event = (macRadioEventInQueue(&main_instance.mac_radio) > MAC_RADIO_SUCCESS);
+
+        // Track how long we spent inside macRadioProcess()
+        uint64_t radio_elapsed_us = 0;
+
+        if (has_event) {
+            // Time before calling macRadioProcess
+            uint64_t radio_start_us = to_us_since_boot(get_absolute_time());
+
+            int32_t res = macRadioProcess(&main_instance.mac_radio);
+            if (res != MAC_RADIO_SUCCESS) {
+                LOG("RADIO PROCESS FAILED! %i\n", res);
+                device_error();
+            }
+
+            // Time after returning from macRadioProcess
+            uint64_t radio_end_us = to_us_since_boot(get_absolute_time());
+            radio_elapsed_us       = radio_end_us - radio_start_us;
         }
 
         // Process the button
@@ -282,6 +420,29 @@ int main() {
             LOG("BUTTON PROCESS FAILED!\n");
             device_error();
         }
+
+        // Mark the end of the loop iteration
+        uint64_t loop_end_us   = to_us_since_boot(get_absolute_time());
+        loop_elapsed  += loop_end_us - loop_start_us;
+
+        // === Compute instantaneous ratio & update EMA ===
+        if (loop_elapsed > 0 && radio_elapsed_us > 0) {
+            // ratio for *this loop iteration* in percent
+            float instant_ratio = ((float)radio_elapsed_us / (float)loop_elapsed) * 100.0;
+
+            // pick a smoothing factor
+            float ALPHA = 0.01;  // tune as needed
+
+            // Update the exponential average
+            main_instance.radio_time_percentage = ALPHA * instant_ratio + (1.0 - ALPHA) * main_instance.radio_time_percentage;
+            loop_elapsed  = 0;
+        }
+
+        if (count > PRINT_THROUGHPUT_INTERVAL) {
+            LOG("D: %.1f Bps, P: %.1f%%\n", main_instance.ema_bitrate_bps, main_instance.radio_time_percentage);
+            count = 0;
+        }
+        count++;
     }
 }
 
