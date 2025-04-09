@@ -16,6 +16,7 @@ PICO 18 - SCK
 PICO 19 - MOSI  
 PICO 20 - RESET  
 PICO 21 - DIO0  
+PICO 15 - DIO1  
   
 ## Documentation
 The macRadio module supports three modes of operation.  
@@ -47,5 +48,3 @@ Broadcast packets are similar to stream packets but any device can receive them.
 
 ## Known limitations
  The TDD mode currently only supports two devices in a point to point communication mode.  
- The send function in TDD mode currently does not warn if the packet(a) is longer than the slot time.  
- There might be issues when trying to send close to max throughput, Im working on that..
