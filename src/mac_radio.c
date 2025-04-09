@@ -697,7 +697,14 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
             // No other packet is currently supported
             // It would indicate that the contents of the packet was corrupt or mangled by lower layers
             LOG("Invalid packet type %u\n", pkt_type);
-            return PHY_RADIO_CB_ERROR;
+
+            int32_t result = cBufferClear(packet->pkt_buffer);
+
+            if (result != C_BUFFER_SUCCESS) {
+                return result; // Fatal error
+            }
+
+            return PHY_RADIO_CB_SUCCESS;
     }
 
     if (cb_retval != MAC_RADIO_CB_SUCCESS) {
