@@ -15,9 +15,9 @@ if(WIN32)
 else()
     set(USERHOME $ENV{HOME})
 endif()
-set(sdkVersion 2.1.0)
+set(sdkVersion 2.1.1)
 set(toolchainVersion 13_3_Rel1)
-set(picotoolVersion 2.1.0)
+set(picotoolVersion 2.1.1)
 set(picoVscode ${USERHOME}/.pico-sdk/cmake/pico-vscode.cmake)
 if (EXISTS ${picoVscode})
     include(${picoVscode})
@@ -106,12 +106,11 @@ pico_set_program_name(radio_mac_auto_high_throughput "radio_mac_auto_high_throug
 pico_set_program_version(radio_mac_auto_high_throughput "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(radio_mac_auto_high_throughput 1)
+pico_enable_stdio_uart(radio_mac_auto_high_throughput 0)
 pico_enable_stdio_usb(radio_mac_auto_high_throughput 1)
 
 # Set phy and hal library configurations
 target_compile_definitions(radio_mac_auto_high_throughput PRIVATE
-    HAL_RADIO_SLOT_GPIO_DEBUG=1
     HAL_RADIO_MAX_BUFFER_SIZE=255
     PHY_RADIO_SLOT_TIME_US=8000
     PHY_RADIO_GUARD_TIME_US=500
