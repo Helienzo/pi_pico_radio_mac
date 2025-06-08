@@ -3,28 +3,22 @@
  * @author:     Lucas Wennerholm <lucas.wennerholm@gmail.com>
  * @brief:      Implementation of radio mac layer
  *
- * @license: MIT License
+ * @license: Apache 2.0
  *
- * Copyright (c) 2024 Lucas Wennerholm
+ * Copyright 2025 Lucas Wennerholm
  *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
  *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
-*/
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include "mac_radio.h"
 #include <string.h>
@@ -489,7 +483,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
 static int32_t manageAckPkt(macRadio_t * inst, macRadioPktTrackItem_t * track_item)  {
     if (track_item == NULL) {
         // This is an acknowlagement sent on an unkonwn msg_id
-        LOG("BAD ACK, unknown response\n");
+        LOG("BAD/OLD ACK\n");
         // Most likely this is a message that has allready timed out
         return MAC_RADIO_CB_SUCCESS;
     }
@@ -658,24 +652,41 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
         } break;
         case MAC_RADIO_SYNC_ACK_PKT: {
             // We have received a connect request, manage it
-            inst->connections.conn_state = MAC_RADIO_CONNECTED;
-            inst->connections.target_addr = packet->addr; // Get the address of requesting device
-
             int32_t res = MAC_RADIO_SUCCESS;
-            if ((res = InternalSendOnConnection(inst, MAC_RADIO_ACK_PKT, msg_id)) != MAC_RADIO_SUCCESS) {
-                return res;
+            if (inst->connections.conn_state != MAC_RADIO_CONNECTED) {
+                inst->connections.conn_state = MAC_RADIO_CONNECTED;
+                inst->connections.target_addr = packet->addr; // Get the address of requesting device
+
+                if ((res = InternalSendOnConnection(inst, MAC_RADIO_ACK_PKT, msg_id)) != MAC_RADIO_SUCCESS) {
+                    return res;
+                }
+
+                // Trigger connection Callback
+                macRadioConn_t new_connection = {
+                    .conn_id = 0, // TODO manage handout of connID's
+                    .conn_state = MAC_RADIO_CONNECTED,
+                };
+
+                // Manage connections
+                LOG_DEBUG("Connected as CENTRAL\n");
+                cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
+            } else {
+                // if we are allready connected, this would indicate that our SYNC_ACK got lost
+
+                // TODO ofcourse we need to keep track if it is a second connection..
+
+                // Make sure to clear the TX queue, all packages scheduled are not valid
+                // Since the receiver does not concider us connected
+                if ((res = phyRadioClearSlot(&inst->phy_instance, inst->connections.my_tx_slot)) != PHY_RADIO_SUCCESS) {
+                    return res;
+                }
+
+                // Resend the ack
+                if ((res = InternalSendOnConnection(inst, MAC_RADIO_ACK_PKT, msg_id)) != MAC_RADIO_SUCCESS) {
+                    return res;
+                }
             }
-
-            // Trigger connection Callback
-            macRadioConn_t new_connection = {
-                .conn_id = 0, // TODO manage handout of connID's
-                .conn_state = MAC_RADIO_CONNECTED,
-            };
-
-            // Manage connections
-            LOG_DEBUG("Connected as CENTRAL\n");
-            cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
-        } break;
+       } break;
         case MAC_RADIO_ACK_PKT: {
             cb_retval = manageAckPkt(inst, track_item);
         } break;

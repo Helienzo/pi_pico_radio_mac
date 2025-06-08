@@ -24,7 +24,7 @@
 // Configure device address
 #define RADIO_MY_ADDR             (0x01)
 #define RADIO_TX_BUFFER_SIZE      (255 + C_BUFFER_ARRAY_OVERHEAD) 
-#define PKT_LED                   (9)
+#define PKT_LED                   (13)
 #define PRINT_THROUGHPUT_INTERVAL (25000)
 
 #ifndef LOG
