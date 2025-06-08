@@ -18,7 +18,7 @@
 // Configure device address
 #define RADIO_MY_ADDR         (0x02)
 #define RADIO_TX_BUFFER_SIZE  (128 + C_BUFFER_ARRAY_OVERHEAD) 
-#define PKT_LED               (9)
+#define PKT_LED               (13)
 
 #ifndef LOG
 #define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
