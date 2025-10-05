@@ -44,8 +44,21 @@
 
 #define MAC_RADIO_DEFAULT_NUM_BEACONS     (8)
 #define MAC_RADIO_MIN_NUM_BEACONS         (2)
-#define MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS (2*PHY_RADIO_SUPERFRAME_TIME_MS)
-#define MAC_RADIO_MIN_SCAN_TIMEOUT_MS     (PHY_RADIO_SUPERFRAME_TIME_MS)
+#define MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS (10*5*8)
+#define MAC_RADIO_MIN_SCAN_TIMEOUT_MS     (5*5*8)
+
+static phyRadioFrameConfig_t frame_config = {
+    .frame_length_us = 0, //  This field is automatically updated when the frame is configured
+    .num_slots       = PHY_RADIO_NUM_SLOTS_IN_FRAME,
+    .slots = {
+        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SYNC_SLOT_TIME_US, .slot_end_guard_us = 0,},
+        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
+        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
+    },
+    .sync_interval = 4,
+    .end_guard     = PHY_RADIO_FRAME_GUARD_US,
+};
+
 
 static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id);
 
@@ -162,7 +175,7 @@ static int32_t disconnectAndNotify(macRadio_t *inst) {
 
 static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // The radio is successfully configured as a central device
-    inst->connections.my_tx_slot  = sync_state->tx_slot_number;
+    inst->connections.my_tx_slot  = 2;//sync_state->tx_slot_number;
     inst->connections.last_heard++;
 
     // Check if the connection has timed out
@@ -205,10 +218,17 @@ static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncSta
 
     // Store the central address and my assigned TX slot
     inst->connections.target_addr = sync_state->central_address;
-    inst->connections.my_tx_slot  = sync_state->tx_slot_number;
+    inst->connections.my_tx_slot  = 1; //sync_state->tx_slot_number;
+
+    int32_t res = PHY_RADIO_SUCCESS;
+    // Receive on slot 1 indefinetly
+    if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+        LOG("RADIO SET MODE FAILED! %i\n", res);
+        return res;
+    }
 
     // Trigger a connect request
-    int32_t res = InternalSendOnConnection(inst, MAC_RADIO_SYNC_ACK_PKT, 0);
+    res = InternalSendOnConnection(inst, MAC_RADIO_SYNC_ACK_PKT, 0);
     if (res != MAC_RADIO_SUCCESS) {
         return res;
     }
@@ -349,6 +369,12 @@ static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sy
     // Switch to central mode
     int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
     if (res != PHY_RADIO_SUCCESS) {
+        return res;
+    }
+
+    // Receive on slot 2 indefinetly
+    if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+        LOG("RADIO SET MODE FAILED! %i\n", res);
         return res;
     }
 
@@ -863,6 +889,12 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
 
     // Initialize the phy radio
     if ((res = phyRadioInit(&inst->phy_instance, &inst->phy_interface, config.my_address)) != PHY_RADIO_SUCCESS) {
+        return res;
+    }
+
+    // Configure TDMA frame, note that the casting from const to non const here is not great
+    if ((res = phyRadioSetFrameStructure(&inst->phy_instance, &frame_config)) != PHY_RADIO_SUCCESS) {
+        LOG("RADIO FRAME CONFIG FAILED! %i\n", res);
         return res;
     }
 
