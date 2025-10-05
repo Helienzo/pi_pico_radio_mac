@@ -24,7 +24,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define DEFAULT_TTL 1
+#define DEFAULT_TTL 3
 
 #ifndef LOG
 #define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
@@ -52,6 +52,7 @@ static phyRadioFrameConfig_t frame_config = {
     .num_slots       = PHY_RADIO_NUM_SLOTS_IN_FRAME,
     .slots = {
         {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SYNC_SLOT_TIME_US, .slot_end_guard_us = 0,},
+        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
         {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
         {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
     },
@@ -175,7 +176,7 @@ static int32_t disconnectAndNotify(macRadio_t *inst) {
 
 static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // The radio is successfully configured as a central device
-    inst->connections.my_tx_slot  = 2;//sync_state->tx_slot_number;
+    inst->connections.my_tx_slot  = 3;//sync_state->tx_slot_number;
     inst->connections.last_heard++;
 
     // Check if the connection has timed out
@@ -218,13 +219,69 @@ static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncSta
 
     // Store the central address and my assigned TX slot
     inst->connections.target_addr = sync_state->central_address;
-    inst->connections.my_tx_slot  = 1; //sync_state->tx_slot_number;
 
     int32_t res = PHY_RADIO_SUCCESS;
-    // Receive on slot 1 indefinetly
-    if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-        LOG("RADIO SET MODE FAILED! %i\n", res);
-        return res;
+    if (inst->current_config.my_address == 2 && sync_state->central_address == 1) {
+        inst->connections.my_tx_slot  = 1; //sync_state->tx_slot_number;
+        // Receive on slot 2 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+
+        // Receive on slot 3 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+    }
+
+    if (inst->current_config.my_address == 2 && sync_state->central_address == 3) {
+        inst->connections.my_tx_slot  = 2; //sync_state->tx_slot_number;
+
+        // Receive on slot 2 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+
+        // Receive on slot 3 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+    }
+
+    if (inst->current_config.my_address == 3) {
+        inst->connections.my_tx_slot  = 2; //sync_state->tx_slot_number;
+
+        // Receive on slot 2 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+
+        // Receive on slot 3 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+    }
+
+    if (inst->current_config.my_address == 1) {
+        inst->connections.my_tx_slot  = 1; //sync_state->tx_slot_number;
+
+        // Receive on slot 2 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+
+        // Receive on slot 3 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
     }
 
     // Trigger a connect request
@@ -377,6 +434,13 @@ static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sy
         LOG("RADIO SET MODE FAILED! %i\n", res);
         return res;
     }
+
+    // Receive on slot 2 indefinetly
+    if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+        LOG("RADIO SET MODE FAILED! %i\n", res);
+        return res;
+    }
+
 
     return PHY_RADIO_CB_SUCCESS;
 }
@@ -679,9 +743,10 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
         case MAC_RADIO_SYNC_ACK_PKT: {
             // We have received a connect request, manage it
             int32_t res = MAC_RADIO_SUCCESS;
-            if (inst->connections.conn_state != MAC_RADIO_CONNECTED) {
+           // if (inst->connections.conn_state != MAC_RADIO_CONNECTED) {
                 inst->connections.conn_state = MAC_RADIO_CONNECTED;
                 inst->connections.target_addr = packet->addr; // Get the address of requesting device
+                LOG("ACK %i\n", packet->addr);
 
                 if ((res = InternalSendOnConnection(inst, MAC_RADIO_ACK_PKT, msg_id)) != MAC_RADIO_SUCCESS) {
                     return res;
@@ -696,7 +761,9 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 // Manage connections
                 LOG_DEBUG("Connected as CENTRAL\n");
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
-            } else {
+             /*
+            }
+            else {
                 // if we are allready connected, this would indicate that our SYNC_ACK got lost
 
                 // TODO ofcourse we need to keep track if it is a second connection..
@@ -712,6 +779,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                     return res;
                 }
             }
+                */
        } break;
         case MAC_RADIO_ACK_PKT: {
             cb_retval = manageAckPkt(inst, track_item);

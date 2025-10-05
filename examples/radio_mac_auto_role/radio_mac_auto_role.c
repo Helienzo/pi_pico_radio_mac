@@ -217,6 +217,7 @@ int main() {
     int rc = pico_led_init();
     hard_assert(rc == PICO_OK);
 
+    pico_set_led(true);
     // Prepare bootsel button
     main_instance.btn_interface.event_cb = buttonEventCb;
     int32_t res = picoBootSelButtonInit(&main_instance.boot_button, &main_instance.btn_interface);
@@ -266,6 +267,8 @@ int main() {
         LOG("Set Mode Failed\n");
         device_error();
     }
+
+    pico_set_led(false);
 
     // Process forever
     while (true) {
