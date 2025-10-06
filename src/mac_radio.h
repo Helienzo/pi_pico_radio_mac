@@ -56,6 +56,10 @@ extern "C" {
 #define MAC_RADIO_MAP_SIZE (5)
 #endif /* MAC_RADIO_MAP_SIZE */
 
+#ifndef MAC_RADIO_MAX_NUM_CONNECTIONS
+#define MAC_RADIO_MAX_NUM_CONNECTIONS (2)
+#endif /* MAC_RADIO_MAX_NUM_CONNECTIONS */
+
 // Max Number of missed keep alive from peripheral before a disconnect is triggered
 #define MAC_RADIO_SYNC_TIMEOUT (PHY_RADIO_SYNC_TIMEOUT) // Use the same as Peripheral timeout
 
@@ -70,6 +74,7 @@ typedef enum {
     MAC_RADIO_NO_CONN_ERROR = -30010,
     MAC_RADIO_PKT_TIMEOUT   = -30011,
     MAC_RADIO_UNKONWN_ACK   = -30012,
+    MAC_RADIO_NEW_CONN_ERR  = -30013,
 } macRadioErr_t;
 
 typedef enum {
@@ -172,6 +177,14 @@ typedef struct {
 } macRadioPktTrackItem_t;
 
 typedef struct {
+    uint32_t last_heard; // Last time we heard from a device
+    uint32_t conn_state;
+    uint32_t targen_tx_slot ;
+    uint32_t target_addr;
+    staticMapItem_t   node;
+} macRadioConnItem_t;
+
+typedef struct {
     // Mode and configuration
     macRadioConfig_t current_config;
     macRadioMode_t   mode;
@@ -179,12 +192,11 @@ typedef struct {
 
     // Connection management
     uint8_t        central_addr;
-    struct {
-        uint32_t last_heard; // Last time we heard from a device
-        uint32_t conn_state;
-        uint32_t my_tx_slot;
-        uint32_t target_addr;
-    } connections;
+
+    uint8_t            my_tx_slot; // Each device only has one TX slot
+    staticMap_t        connections;
+    staticMapItem_t*   _array[MAC_RADIO_MAX_NUM_CONNECTIONS];
+    macRadioConnItem_t _con_items[MAC_RADIO_MAX_NUM_CONNECTIONS];
 
     // Internal Packet management
     macRadioBufferPoolItem_t _buffer_pkt_pool[MAC_RADIO_POOL_SIZE];

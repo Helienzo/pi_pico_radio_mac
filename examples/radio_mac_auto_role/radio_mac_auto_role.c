@@ -48,6 +48,10 @@ typedef struct mainCtx {
     // LED management
     bool led_state;
     bool test_led_state;
+
+    // Connection tracking
+    uint32_t active_conn_ids[MAC_RADIO_MAX_NUM_CONNECTIONS]; // Store active connection IDs
+    uint32_t active_connections; // Count of active connections
 } mainCtx_t;
 
 // Local variables
@@ -121,20 +125,49 @@ int32_t connStateCb(macRadioInterface_t *interface, macRadioConn_t conn_state) {
     // Check the updated connection state
     switch(conn_state.conn_state) {
         case MAC_RADIO_CONNECTED:
-            LOG("CONNECTED\n");
-            inst->led_state = true;
+            LOG("CONNECTED (conn_id: %d)\n", conn_state.conn_id);
+
+            // Add connection if not already tracked
+            bool already_tracked = false;
+            for (uint32_t i = 0; i < inst->active_connections; i++) {
+                if (inst->active_conn_ids[i] == conn_state.conn_id) {
+                    already_tracked = true;
+                    break;
+                }
+            }
+
+            if (!already_tracked && inst->active_connections < MAC_RADIO_MAX_NUM_CONNECTIONS) {
+                inst->active_conn_ids[inst->active_connections] = conn_state.conn_id;
+                inst->active_connections++;
+            }
             break;
+
         case MAC_RADIO_DISCONNECTED:
-            LOG("DISCONNECTED\n");
-            inst->led_state = false;
+            LOG("DISCONNECTED (conn_id: %d)\n", conn_state.conn_id);
+
+            // Remove connection from tracking
+            for (uint32_t i = 0; i < inst->active_connections; i++) {
+                if (inst->active_conn_ids[i] == conn_state.conn_id) {
+                    // Shift remaining connections down
+                    for (uint32_t j = i; j < inst->active_connections - 1; j++) {
+                        inst->active_conn_ids[j] = inst->active_conn_ids[j + 1];
+                    }
+                    inst->active_connections--;
+                    break;
+                }
+            }
             break;
+
         default:
             return MAC_RADIO_CB_ERROR;
     }
 
     inst->packet.conn_id = conn_state.conn_id;
 
+    // Only turn LED on if we have at least one active connection
+    inst->led_state = (inst->active_connections > 0);
     pico_set_led(inst->led_state);
+
     return MAC_RADIO_CB_SUCCESS;
 }
 
