@@ -236,17 +236,29 @@ static int32_t connItemCb(staticMap_t *map, staticMapItem_t *map_item) {
     return STATIC_MAP_CB_NEXT;
 }
 
-static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
-    // The radio is successfully configured as a central device
-    inst->my_tx_slot  = 3;//sync_state->tx_slot_number;
+static uint32_t an_addr = 0;
+static int32_t nextDeviceCb(staticMap_t *map, staticMapItem_t *map_item) {
+    macRadioConnItem_t* conn_item = CONTAINER_OF(map_item, macRadioConnItem_t, node);
+    macRadio_t * inst = CONTAINER_OF(map, macRadio_t, connections);
 
+    if (conn_item->conn_state == MAC_RADIO_CONNECTED) {
+        an_addr = conn_item->target_addr;
+
+        if (rand() % 2 == 0) {
+            return STATIC_MAP_CB_STOP;
+        }
+    }
+    return STATIC_MAP_CB_NEXT;
+}
+
+static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // Loop through all active connections and check if any has timed out
     int32_t res = staticMapForEach(&inst->connections, connItemCb);
     if (res != STATIC_MAP_SUCCESS) {
         return res;
     }
 
-   int32_t num_conns = staticMapGetNumItems(&inst->connections);
+    int32_t num_conns = staticMapGetNumItems(&inst->connections);
 
     // If we have no active connections, and are in auto mode
     if (num_conns == 0 && inst->mode == MAC_RADIO_AUTO_MODE) {
@@ -254,6 +266,8 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
 
         // Check if it is time to switch mode
         if (inst->auto_counter == 0) {
+
+            gpio_put(13, false);
             // Switch to scan mode
             int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
@@ -264,10 +278,78 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
             // Decrement the scan counter
             inst->auto_counter--;
         }
+
+    } else if (inst->switch_counter > 0) {
+        inst->switch_counter--;
+        if (inst->switch_counter == 0) {
+            // Loop through all active connections and check if any has timed out
+            int32_t res = staticMapForEach(&inst->connections, nextDeviceCb);
+            if (res != STATIC_MAP_SUCCESS) {
+                return res;
+            }
+
+            res = macRadioSwitchCentral(inst, an_addr);
+            if (res != MAC_RADIO_SUCCESS) {
+                return res;
+            }
+        }
     }
 
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
     return PHY_RADIO_CB_SUCCESS;
+}
+
+static int32_t configureMySlots(macRadio_t *inst) {
+    int32_t res = MAC_RADIO_SUCCESS;
+    if (inst->current_config.my_address == 1) {
+        inst->my_tx_slot  = 1; //sync_state->tx_slot_number;
+
+        // Receive on slot 2 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+
+        // Receive on slot 3 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+    }
+
+
+    if (inst->current_config.my_address == 2) {
+        inst->my_tx_slot = 2; //sync_state->tx_slot_number;
+        // Receive on slot 2 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+
+        // Receive on slot 3 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+    }
+
+    if (inst->current_config.my_address == 3) {
+        inst->my_tx_slot  = 3; //sync_state->tx_slot_number;
+
+        // Receive on slot 2 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+
+        // Receive on slot 3 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+            LOG("RADIO SET MODE FAILED! %i\n", res);
+            return res;
+        }
+    }
+
+    return res;
 }
 
 static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
@@ -285,68 +367,10 @@ static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncSta
     // Store the central address and my assigned TX slot
     new_conn->target_addr = sync_state->central_address;
 
-    int32_t res = PHY_RADIO_SUCCESS;
-    if (inst->current_config.my_address == 2 && sync_state->central_address == 1) {
-        inst->my_tx_slot = 1; //sync_state->tx_slot_number;
-        // Receive on slot 2 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-
-        // Receive on slot 3 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-    }
-
-    if (inst->current_config.my_address == 2 && sync_state->central_address == 3) {
-        inst->my_tx_slot  = 2; //sync_state->tx_slot_number;
-
-        // Receive on slot 2 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-
-        // Receive on slot 3 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-    }
-
-    if (inst->current_config.my_address == 3) {
-        inst->my_tx_slot  = 2; //sync_state->tx_slot_number;
-
-        // Receive on slot 2 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-
-        // Receive on slot 3 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-    }
-
-    if (inst->current_config.my_address == 1) {
-        inst->my_tx_slot  = 1; //sync_state->tx_slot_number;
-
-        // Receive on slot 2 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-
-        // Receive on slot 3 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
+    // Configure my slots
+    int32_t res = configureMySlots(inst);
+    if (res != MAC_RADIO_SUCCESS) {
+        return res;
     }
 
     // Trigger a connect request
@@ -412,6 +436,7 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
     // Manage auto mode
     if (inst->mode == MAC_RADIO_AUTO_MODE) {
         // If we are in auto mode return to scan on disconnect
+        gpio_put(13, false);
         int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
         if (res != PHY_RADIO_SUCCESS) {
             return res;
@@ -421,6 +446,7 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
 
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
     // Inform the phy layer to return to scan mode
+    gpio_put(13, false);
     return PHY_RADIO_CB_SET_SCAN;
 }
 
@@ -495,6 +521,7 @@ static int32_t manageCentralConflictingSync(macRadio_t *inst, const phyRadioSync
         return res;
     }
 
+    gpio_put(13, false);
     // Inform phy to enter scan mode
     return PHY_RADIO_CB_SET_SCAN;
 }
@@ -510,23 +537,16 @@ static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sy
     inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
 
     // Switch to central mode
+    gpio_put(13, true);
     int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
     if (res != PHY_RADIO_SUCCESS) {
         return res;
     }
 
-    // Receive on slot 2 indefinetly
-    if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-        LOG("RADIO SET MODE FAILED! %i\n", res);
+    res = configureMySlots(inst);
+    if (res != MAC_RADIO_SUCCESS) {
         return res;
     }
-
-    // Receive on slot 2 indefinetly
-    if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-        LOG("RADIO SET MODE FAILED! %i\n", res);
-        return res;
-    }
-
 
     return PHY_RADIO_CB_SUCCESS;
 }
@@ -592,6 +612,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
     macRadioPktTrackItem_t *track_item = NULL;
     switch(mac_pkt->pkt_type) {
         case MAC_RADIO_SYNC_ACK_PKT:
+        case MAC_RADIO_HANDOVER_PKT:
         case MAC_RADIO_RELIABLE_PKT: {
             // Manage acknowlaged packets
             if (result != PHY_RADIO_SUCCESS) {
@@ -709,6 +730,36 @@ static int32_t manageAckPkt(macRadio_t * inst, uint32_t src_addr, macRadioPktTra
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
             }
         } break; 
+
+        case MAC_RADIO_HANDOVER_PKT: {
+            uint32_t conn_id = mac_pkt->conn_id;
+
+            int32_t res = MAC_RADIO_SUCCESS;
+            // Release the internal buffer used for this message, MAC_RADIO_SYNC_ACK_PKT, is allways internal
+            if ((res = releaseBufferByMac(inst, mac_pkt)) != STATIC_POOL_SUCCESS) {
+                return res;
+            }
+
+            // Remove the packet from the map
+            if ((res = unTrackMacPktByItem(&inst->track_map, track_item)) != STATIC_MAP_SUCCESS) {
+                return res;
+            }
+
+            // Find the connection
+            macRadioConnItem_t* conn = getConnection(&inst->connections, src_addr);
+
+            if (conn == NULL) {
+                // This was not a packet to me
+                // TODO what to do??
+                break;
+            }
+
+            gpio_put(13, false);
+            res = phyRadioTransitionCentralToPeripheral(&inst->phy_instance, inst->central_addr);
+            if (res != PHY_RADIO_SUCCESS) {
+                return res;
+            }
+        } break; 
         case MAC_RADIO_RELIABLE_PKT: {
             if (track_item->internal) {
                 int32_t res = MAC_RADIO_SUCCESS;
@@ -765,6 +816,7 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
     switch(inst->mode) {
         case MAC_RADIO_PERIPHERAL: {
             // Return the phy to scan mode
+        gpio_put(13, false);
             int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
             if (res != PHY_RADIO_SUCCESS) {
                 return res;
@@ -773,6 +825,7 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
         } break;
         case MAC_RADIO_AUTO_MODE: {
             // Restart scan mode
+        gpio_put(13, false);
             int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
             if (res != PHY_RADIO_SUCCESS) {
@@ -876,6 +929,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
 
                 // Manage connections
                 LOG("Connected as CENTRAL\n");
+                inst->switch_counter = 10;
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
             } else {
                 // if we are allready connected, this would indicate that our SYNC_ACK got lost
@@ -891,7 +945,27 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                     return res;
                 }
             }
-       } break;
+        } break;
+        case MAC_RADIO_HANDOVER_PKT: {
+            macRadioConnItem_t* conn = getConnection(&inst->connections, packet->addr);
+
+            if (conn == NULL || conn->conn_state != MAC_RADIO_CONNECTED) {
+                // Check if it is my central that is handing over
+                break;
+            }
+
+            int32_t res = MAC_RADIO_SUCCESS;
+            if ((res = InternalSendOnConnection(inst, MAC_RADIO_ACK_PKT, msg_id, conn->target_addr)) != MAC_RADIO_SUCCESS) {
+                return res;
+            }
+
+            gpio_put(13, true);
+            inst->switch_counter = 10;
+            res = phyRadioTransitionPeripheralToCentral(&inst->phy_instance);
+            if (res != PHY_RADIO_SUCCESS) {
+                return res;
+            }
+        } break;
         case MAC_RADIO_ACK_PKT: {
             cb_retval = manageAckPkt(inst, packet->addr, track_item);
         } break;
@@ -971,6 +1045,7 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
     macRadioPktTrackItem_t* track_item = NULL;
     switch(packet_type) {
         case MAC_RADIO_RELIABLE_PKT:
+        case MAC_RADIO_HANDOVER_PKT:
         case MAC_RADIO_SYNC_ACK_PKT:
             // Keep track of this packet, wait for acknowlagement
             track_item = trackMacPacket(&inst->track_map, &buffer_item->mac_pkt, msg_id);
@@ -994,6 +1069,7 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
         // If the buffer is full or any other error stop here
         return MAC_RADIO_BUFFER_ERROR;
     }
+
     // Prepend the packet type
     if ((res = cBufferPrependByte(pkt_buffer, packet_type)) != MAC_RADIO_PKT_TYPE_SIZE) {
         // If the buffer is full or any other error stop here
@@ -1066,6 +1142,7 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
     // Set the first msg ID to 0
     inst->msg_id = 0;
     inst->auto_counter = 0;
+    inst->switch_counter = 0;
 
     // Seed the random generator with address and current time
     srand(config.my_address + (unsigned)time_us_64());
@@ -1162,12 +1239,14 @@ int32_t macRadioSetAutoMode(macRadio_t *inst) {
 
     // Randomly select if to start in cental or peripheral mode
     if (inst->auto_counter % 2 == 0) {
+        gpio_put(13, false);
         int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
         if (res != PHY_RADIO_SUCCESS) {
             return res;
         }
     } else {
+        gpio_put(13, true);
         int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
         if (res != PHY_RADIO_SUCCESS) {
             return res;
@@ -1196,6 +1275,7 @@ int32_t macRadioSetCentralMode(macRadio_t *inst) {
             break;
     }
 
+        gpio_put(13, true);
     int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
     if (res != PHY_RADIO_SUCCESS) {
         return res;
@@ -1223,6 +1303,7 @@ int32_t macRadioSetPeripheralMode(macRadio_t *inst) {
             break;
     }
 
+    gpio_put(13, false);
     int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
 
     if (res != PHY_RADIO_SUCCESS) {
@@ -1337,4 +1418,22 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
     }
 
     return res;
+}
+
+
+int32_t macRadioSwitchCentral(macRadio_t *inst, uint32_t next_central_addr) {
+    if (inst == NULL) {
+        return MAC_RADIO_NULL_ERROR;
+    }
+
+    // Switch to scan mode, try to handover
+    int32_t res = InternalSendOnConnection(inst, MAC_RADIO_HANDOVER_PKT, 0, next_central_addr);
+
+    if (res != MAC_RADIO_SUCCESS) {
+        return res;
+    }
+
+    inst->central_addr = next_central_addr;
+
+    return MAC_RADIO_SUCCESS;
 }

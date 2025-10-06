@@ -112,6 +112,7 @@ typedef enum {
     MAC_RADIO_STREAM_PKT,    // This packet is not acknowlaged
     MAC_RADIO_BROADCAST_PKT, // This packet is heard by any listener
     MAC_RADIO_CLOSE_PKT,
+    MAC_RADIO_HANDOVER_PKT,
 } macRadioPacketType_t;
 
 typedef enum {
@@ -189,6 +190,7 @@ typedef struct {
     macRadioConfig_t current_config;
     macRadioMode_t   mode;
     uint8_t          auto_counter;
+    uint8_t          switch_counter;
 
     // Connection management
     uint8_t        central_addr;
@@ -278,6 +280,11 @@ int32_t macRadioSetPeripheralMode(macRadio_t *inst);
  * Returns: macRadioErr_t
  */
 int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet);
+
+/**
+ * Change master
+ */
+int32_t macRadioSwitchCentral(macRadio_t *inst, uint32_t next_central_addr);
 
 #ifdef __cplusplus
 }

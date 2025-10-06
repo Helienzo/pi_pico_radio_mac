@@ -127,6 +127,8 @@ int32_t connStateCb(macRadioInterface_t *interface, macRadioConn_t conn_state) {
         case MAC_RADIO_CONNECTED:
             LOG("CONNECTED (conn_id: %d)\n", conn_state.conn_id);
 
+            inst->packet.conn_id = conn_state.conn_id;
+
             // Add connection if not already tracked
             bool already_tracked = false;
             for (uint32_t i = 0; i < inst->active_connections; i++) {
@@ -161,8 +163,6 @@ int32_t connStateCb(macRadioInterface_t *interface, macRadioConn_t conn_state) {
         default:
             return MAC_RADIO_CB_ERROR;
     }
-
-    inst->packet.conn_id = conn_state.conn_id;
 
     // Only turn LED on if we have at least one active connection
     inst->led_state = (inst->active_connections > 0);
