@@ -47,20 +47,6 @@
 #define MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS (10*5*8)
 #define MAC_RADIO_MIN_SCAN_TIMEOUT_MS     (5*5*8)
 
-static phyRadioFrameConfig_t frame_config = {
-    .frame_length_us = 0, //  This field is automatically updated when the frame is configured
-    .num_slots       = PHY_RADIO_NUM_SLOTS_IN_FRAME,
-    .slots = {
-        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SYNC_SLOT_TIME_US, .slot_end_guard_us = 0,},
-        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
-        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
-        {.slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US, .slot_length_us = PHY_RADIO_ACTIVE_SLOT_TIME_US, .slot_end_guard_us = 0,},
-    },
-    .sync_interval = 4,
-    .end_guard     = PHY_RADIO_FRAME_GUARD_US,
-};
-
-
 static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id, uint32_t target_addr);
 
 static int32_t releasePacketByPhy(macRadio_t *inst, phyRadioPacket_t *packet) {
@@ -199,8 +185,6 @@ static int32_t disconnectAndNotify(macRadio_t *inst, macRadioConnItem_t *connect
         return MAC_RADIO_SUCCESS;
     }
 
-    // TODO should we cleanup the unsent packages?
-
     connection->conn_state = MAC_RADIO_DISCONNECTED;
 
     // Trigger connection Callback
@@ -299,6 +283,7 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
     return PHY_RADIO_CB_SUCCESS;
 }
 
+// TODO this is very hardcoded ..
 static int32_t configureMySlots(macRadio_t *inst) {
     int32_t res = MAC_RADIO_SUCCESS;
     if (inst->current_config.my_address == 1) {
@@ -455,10 +440,17 @@ static int32_t mapItemCb(staticMap_t *map, staticMapItem_t *map_item) {
     macRadio_t * inst = CONTAINER_OF(map, macRadio_t, track_map);
 
     if (track_item->ttl == 0) {
+
+        int32_t res = phyRadioRemoveFromSlot(&inst->phy_instance, track_item->phy_pkt);
+        if (res != PHY_RADIO_SUCCESS) {
+            // Fatal, something is very bad
+            return res;
+        }
+
         // Check if it is an external or internal packet that has timed out
         if (track_item->internal) {
             // Release buffers used by internal packets
-            int32_t res = releaseBufferByMac(inst, track_item->mac_pkt);
+            res = releaseBufferByMac(inst, track_item->mac_pkt);
             if (res != STATIC_POOL_SUCCESS) {
                 // Fatal, something is very bad
                 return res;
@@ -726,7 +718,7 @@ static int32_t manageAckPkt(macRadio_t * inst, uint32_t src_addr, macRadioPktTra
                 };
 
                 // Manage connections
-                LOG("Connected as PERIPHERAL\n");
+                LOG_DEBUG("Connected as PERIPHERAL\n");
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
             }
         } break; 
@@ -862,7 +854,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
     macRadioPktTrackItem_t * track_item = findTrackedMacPkt(&inst->track_map, msg_id);
 
     macRadioPacket_t new_packet = {
-        .conn_id    = 0, // TODO what is the conn_id?
+        .conn_id    = 0, // TODO what is the conn_id? And specifically what is the conn id before a connection
         .pkt_buffer = packet->pkt_buffer,
         .pkt_type   = pkt_type,
     };
@@ -873,14 +865,14 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
         case MAC_RADIO_STREAM_PKT:
         case MAC_RADIO_BROADCAST_PKT: {
             // Broadcast and stream packets are accepted by all devices
-            /*
             macRadioConnItem_t* conn = getConnection(&inst->connections, packet->addr);
 
             if (conn == NULL || conn->conn_state != MAC_RADIO_CONNECTED) {
-                // Only manage these packets from the phy if we are connected
-                break;
+                // Mark that this packet comes from an unconnected device
+                new_packet.conn_id = 0xFF;
+            } else {
+                new_packet.conn_id = packet->addr;
             }
-            */
 
             cb_retval = inst->interface->pkt_cb(inst->interface, &new_packet);
            } break;
@@ -891,6 +883,9 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 // Only manage these packets from the phy if we are connected
                 break;
             }
+
+            // Update the conn_id for this packet
+            new_packet.conn_id = packet->addr;
 
             // Acknowlage this packet
             int32_t res = MAC_RADIO_SUCCESS;
@@ -915,7 +910,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
             if (conn->conn_state != MAC_RADIO_CONNECTED) {
                 conn->conn_state = MAC_RADIO_CONNECTED;
                 conn->target_addr = packet->addr; // Get the address of requesting device
-                LOG("ACK %i\n", packet->addr);
+                LOG_DEBUG("ACK %i\n", packet->addr);
 
                 if ((res = InternalSendOnConnection(inst, MAC_RADIO_ACK_PKT, msg_id, conn->target_addr)) != MAC_RADIO_SUCCESS) {
                     return res;
@@ -979,7 +974,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 if ((res = InternalSendOnConnection(inst, MAC_RADIO_CLOSE_PKT, msg_id, packet->addr)) != MAC_RADIO_SUCCESS) {
                     return res;
                 }
-                LOG("Unconnected keep alive\n");
+                LOG_DEBUG("Unconnected keep alive\n");
             }
             break;
         case MAC_RADIO_CLOSE_PKT:
@@ -1029,6 +1024,7 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
 
     cBuffer_t *pkt_buffer = &buffer_item->msg_buf;
     buffer_item->mac_pkt.pkt_type = packet_type;
+    buffer_item->mac_pkt.conn_id  = target_addr;
 
     // Make sure the buffer is fresh and empty
     cBufferClear(pkt_buffer);
@@ -1079,6 +1075,7 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
     // Get a packet from the available pool
     macRadioPktPoolItem_t *packet_item = aquirePacket(inst);
     if (packet_item == NULL) {
+        LOG("pool err\n");
         return MAC_RADIO_POOL_ERROR;
     }
 
@@ -1116,6 +1113,8 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
         }
 
         return res;
+    } else if (track_item != NULL) {
+        track_item->phy_pkt = new_packet;
     }
 
     return MAC_RADIO_SUCCESS;
@@ -1192,8 +1191,30 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
         return res;
     }
 
+    // Configure the TDMA frame
+    inst->frame_config.frame_length_us = 0; // Automatically updated by lower layer
+    // The number of slots is one for the sync and then N data slots
+    inst->frame_config.num_slots       = 1 + inst->current_config.num_data_slots;
+
+    // Configure the time intervals of each slot
+    for (uint32_t i = 0; i < inst->frame_config.num_slots; i++) {
+        // Speciall config for the sync slot
+        if (i == 0) {
+            inst->frame_config.slots[i].slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US;
+            inst->frame_config.slots[i].slot_length_us      = PHY_RADIO_ACTIVE_SYNC_SLOT_TIME_US;
+            inst->frame_config.slots[i].slot_end_guard_us   = 0; // Not yet supported
+        } else {
+            inst->frame_config.slots[i].slot_start_guard_us = PHY_RADIO_SLOT_GUARD_TIME_US;
+            inst->frame_config.slots[i].slot_length_us      = PHY_RADIO_ACTIVE_SLOT_TIME_US;
+            inst->frame_config.slots[i].slot_end_guard_us   = 0; // Not yet supported
+        }
+    }
+    // Set the interval and end guard
+    inst->frame_config.sync_interval = MAC_RADIO_SYNC_INTERVAL;
+    inst->frame_config.end_guard     = PHY_RADIO_FRAME_GUARD_US;
+
     // Configure TDMA frame, note that the casting from const to non const here is not great
-    if ((res = phyRadioSetFrameStructure(&inst->phy_instance, &frame_config)) != PHY_RADIO_SUCCESS) {
+    if ((res = phyRadioSetFrameStructure(&inst->phy_instance, &inst->frame_config)) != PHY_RADIO_SUCCESS) {
         LOG("RADIO FRAME CONFIG FAILED! %i\n", res);
         return res;
     }
@@ -1281,6 +1302,11 @@ int32_t macRadioSetCentralMode(macRadio_t *inst) {
         return res;
     }
 
+    res = configureMySlots(inst);
+    if (res != MAC_RADIO_SUCCESS) {
+        return res;
+    }
+
     inst->mode = MAC_RADIO_CENTRAL;
 
     return MAC_RADIO_SUCCESS;
@@ -1310,6 +1336,11 @@ int32_t macRadioSetPeripheralMode(macRadio_t *inst) {
         return res;
     }
 
+    res = configureMySlots(inst);
+    if (res != MAC_RADIO_SUCCESS) {
+        return res;
+    }
+
     inst->mode = MAC_RADIO_PERIPHERAL;
 
     return MAC_RADIO_SUCCESS;
@@ -1330,6 +1361,8 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
         if (num_conns == 0 || packet->pkt_type != MAC_RADIO_BROADCAST_PKT) {
             return MAC_RADIO_NO_CONN_ERROR;
         }
+    } else if (conn->conn_state != MAC_RADIO_CONNECTED) {
+            return MAC_RADIO_NO_CONN_ERROR;
     } else {
         target_addr = conn->target_addr;
     }
@@ -1415,6 +1448,8 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
         }
 
         return res;
+    } else if (track_item != NULL) {
+        track_item->phy_pkt = new_packet;
     }
 
     return res;

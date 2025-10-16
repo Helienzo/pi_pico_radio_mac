@@ -60,6 +60,10 @@ extern "C" {
 #define MAC_RADIO_MAX_NUM_CONNECTIONS (2)
 #endif /* MAC_RADIO_MAX_NUM_CONNECTIONS */
 
+#ifndef MAC_RADIO_SYNC_INTERVAL
+#define MAC_RADIO_SYNC_INTERVAL (2)
+#endif /* MAC_RADIO_SYNC_INTERVAL */
+
 // Max Number of missed keep alive from peripheral before a disconnect is triggered
 #define MAC_RADIO_SYNC_TIMEOUT (PHY_RADIO_SYNC_TIMEOUT) // Use the same as Peripheral timeout
 
@@ -147,6 +151,7 @@ struct macRadioInterface {
 
 typedef struct {
     uint8_t my_address;
+    uint8_t num_data_slots;
 } macRadioConfig_t;
 
 struct macRadioConn {
@@ -171,6 +176,7 @@ typedef struct {
 
 typedef struct {
     macRadioPacket_t *mac_pkt;
+    phyRadioPacket_t *phy_pkt;
     uint32_t          ttl;
     bool              sent;
     bool              internal;
@@ -191,6 +197,9 @@ typedef struct {
     macRadioMode_t   mode;
     uint8_t          auto_counter;
     uint8_t          switch_counter;
+
+    // Frame configuration
+    phyRadioFrameConfig_t frame_config;
 
     // Connection management
     uint8_t        central_addr;
@@ -282,7 +291,11 @@ int32_t macRadioSetPeripheralMode(macRadio_t *inst);
 int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet);
 
 /**
- * Change master
+ * Handover the central role to another device, only valid if this device currently is central
+ * If this succeeds this device will become peripheral
+ * Input: Pointer to mac radio instance
+ * Input: The address to the next device intended as central
+ * Returns: macRadioErr_t
  */
 int32_t macRadioSwitchCentral(macRadio_t *inst, uint32_t next_central_addr);
 
