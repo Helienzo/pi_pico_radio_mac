@@ -267,6 +267,8 @@ int main() {
 
     macRadioConfig_t mac_config = {
         .my_address = RADIO_MY_ADDR,
+        .num_data_slots = MAC_RADIO_MAX_NUM_CONNECTIONS + 1,
+
     };
 
     // Initialize the radio

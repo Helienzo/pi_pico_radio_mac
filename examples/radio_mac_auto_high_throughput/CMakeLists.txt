@@ -112,12 +112,9 @@ pico_enable_stdio_usb(radio_mac_auto_high_throughput 1)
 # Set phy and hal library configurations
 target_compile_definitions(radio_mac_auto_high_throughput PRIVATE
     HAL_RADIO_MAX_BUFFER_SIZE=255
-    PHY_RADIO_SLOT_TIME_US=8000
-    PHY_RADIO_GUARD_TIME_US=500
-    PHY_RADIO_PACKET_GUARD_TIME_US=20
-    PHY_RADIO_SUPERFRAME_LEN=3
-    PHY_RADIO_SYNC_TIMEOUT=9
-    PHY_RADIO_BIT_RATE=HAL_RADIO_BITRATE_250
+    PHY_RADIO_BIT_RATE=HAL_RADIO_BITRATE_300
+    HAL_RADIO_SLOT_GPIO_DEBUG=1
+    HAL_RADIO_PIN_TX_RX=12
 )
 
 # Add the standard library to the build

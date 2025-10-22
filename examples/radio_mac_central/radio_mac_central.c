@@ -232,6 +232,7 @@ int main() {
 
     macRadioConfig_t mac_config = {
         .my_address = RADIO_MY_ADDR,
+        .num_data_slots = 2,
     };
 
     // Initialize the radio

@@ -263,7 +263,9 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
             inst->auto_counter--;
         }
 
-    } else if (inst->switch_counter > 0) {
+    }
+#ifdef AUTO_SWITCH
+     else if (inst->switch_counter > 0) {
         inst->switch_counter--;
         if (inst->switch_counter == 0) {
             // Loop through all active connections and check if any has timed out
@@ -278,6 +280,7 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
             }
         }
     }
+#endif
 
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
     return PHY_RADIO_CB_SUCCESS;
@@ -805,6 +808,8 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
         return res;
     }
 
+    // TODO what if we are waiting to send and receive a reliable packet
+
     switch(inst->mode) {
         case MAC_RADIO_PERIPHERAL: {
             // Return the phy to scan mode
@@ -923,8 +928,11 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 };
 
                 // Manage connections
-                LOG("Connected as CENTRAL\n");
+                LOG_DEBUG("Connected as CENTRAL\n");
+
+#ifdef AUTO_SWITCH
                 inst->switch_counter = 10;
+#endif
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
             } else {
                 // if we are allready connected, this would indicate that our SYNC_ACK got lost
@@ -955,7 +963,9 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
             }
 
             gpio_put(13, true);
+#ifdef AUTO_SWITCH
             inst->switch_counter = 10;
+#endif
             res = phyRadioTransitionPeripheralToCentral(&inst->phy_instance);
             if (res != PHY_RADIO_SUCCESS) {
                 return res;

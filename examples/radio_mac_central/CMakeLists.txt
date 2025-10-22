@@ -109,6 +109,14 @@ pico_set_program_version(radio_mac_central "0.1")
 pico_enable_stdio_uart(radio_mac_central 1)
 pico_enable_stdio_usb(radio_mac_central 1)
 
+# Set phy and hal library configurations
+target_compile_definitions(radio_mac_central PRIVATE
+    HAL_RADIO_MAX_BUFFER_SIZE=255
+    PHY_RADIO_BIT_RATE=HAL_RADIO_BITRATE_300
+    HAL_RADIO_SLOT_GPIO_DEBUG=1
+    HAL_RADIO_PIN_TX_RX=12
+)
+
 # Add the standard library to the build
 target_link_libraries(radio_mac_central
         pico_stdlib)

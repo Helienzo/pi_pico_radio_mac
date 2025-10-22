@@ -108,6 +108,7 @@ static void sendPackage(mainCtx_t* inst) {
     if (!inst->packet_available) {
         return;
     }
+
     int32_t res = cBufferClear(inst->packet.pkt_buffer);
     if (res != C_BUFFER_SUCCESS) {
         LOG("RADIO SEND FAILED! %i\n", res);
@@ -356,7 +357,9 @@ int main() {
     main_instance.mac_interface.resp_cb = respCb;
 
     macRadioConfig_t mac_config = {
-        .my_address = RADIO_MY_ADDR,
+        .my_address     = RADIO_MY_ADDR,
+        // Each device supports N connections, and then we need one slot for this device
+        .num_data_slots = MAC_RADIO_MAX_NUM_CONNECTIONS + 1,
     };
 
     // Initialize the radio

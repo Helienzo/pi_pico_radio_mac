@@ -113,6 +113,12 @@ pico_enable_stdio_usb(radio_mac_auto_role 1)
 target_link_libraries(radio_mac_auto_role
         pico_stdlib)
 
+# Set compile-time options via -D flags
+target_compile_definitions(radio_mac_auto_role PRIVATE
+    HAL_RADIO_SLOT_GPIO_DEBUG=1
+    HAL_RADIO_PIN_TX_RX=12
+)
+
 # Add the standard include files to the build
 target_include_directories(radio_mac_auto_role PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
