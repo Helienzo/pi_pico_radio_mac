@@ -24,7 +24,7 @@
 #include <string.h>
 #include <stdlib.h>
 
-#define DEFAULT_TTL 3
+#define DEFAULT_TTL 1
 
 #ifndef LOG
 #define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
@@ -291,47 +291,15 @@ static int32_t configureMySlots(macRadio_t *inst) {
     int32_t res = MAC_RADIO_SUCCESS;
     if (inst->current_config.my_address == 1) {
         inst->my_tx_slot  = 1; //sync_state->tx_slot_number;
-
-        // Receive on slot 2 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-
-        // Receive on slot 3 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-    }
-
-
-    if (inst->current_config.my_address == 2) {
-        inst->my_tx_slot = 2; //sync_state->tx_slot_number;
-        // Receive on slot 2 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-
-        // Receive on slot 3 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 3, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-    }
-
-    if (inst->current_config.my_address == 3) {
+    } else if (inst->current_config.my_address == 2) {
+        inst->my_tx_slot  = 2; //sync_state->tx_slot_number;
+    } else if (inst->current_config.my_address == 3) {
         inst->my_tx_slot  = 3; //sync_state->tx_slot_number;
+    }
 
-        // Receive on slot 2 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 1, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
-            LOG("RADIO SET MODE FAILED! %i\n", res);
-            return res;
-        }
-
-        // Receive on slot 3 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, 2, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+    for (int i = 1; i < PHY_RADIO_NUM_SLOTS; i++) {
+        // Receive on slot 1 indefinetly
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, i, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
             LOG("RADIO SET MODE FAILED! %i\n", res);
             return res;
         }
@@ -488,7 +456,7 @@ static int32_t mapItemCb(staticMap_t *map, staticMapItem_t *map_item) {
     return STATIC_MAP_CB_NEXT;
 }
 
-static int32_t managePhyRxSlotStart(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
+static int32_t managePhyFrameStart(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // We use this notification to manage packet timeouts, loop through all active packets
     int32_t res = staticMapForEach(&inst->track_map, mapItemCb);
     if (res != STATIC_MAP_SUCCESS) {
@@ -560,10 +528,12 @@ static int32_t phySyncStateCb(phyRadioInterface_t *interface, uint32_t sync_id, 
             return manageCentralConflictingSync(inst, sync_state);
         case PHY_RADIO_SYNC_LOST:
             return managePeripheralSyncLost(inst, sync_state);
+        case PHY_RADIO_FRAME_START:
+            return managePhyFrameStart(inst, sync_state);
         case PHY_RADIO_RX_SLOT_START:
-            return managePhyRxSlotStart(inst, sync_state);
+            break;
         case PHY_RADIO_TX_SLOT_START:
-           break;
+            break;
         case PHY_RADIO_SCAN_TIMEOUT:
             return manageScanTimeout(inst, sync_state);
         default:
