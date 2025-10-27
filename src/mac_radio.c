@@ -318,7 +318,7 @@ static int32_t configureMySlots(macRadio_t *inst) {
 
     for (int i = 1; i < PHY_RADIO_NUM_SLOTS; i++) {
         // Receive on slot 1 indefinetly
-        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, i, PHY_RADIO_INFINITE_SLOT_TYPE)) != PHY_RADIO_SUCCESS) {
+        if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, i)) != PHY_RADIO_SUCCESS) {
             LOG("RADIO SET MODE FAILED! %i\n", res);
             return res;
         }
@@ -1423,6 +1423,7 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
 
     // Manage packet type
     switch (packet->pkt_type) {
+        case MAC_RADIO_STREAM_PKT:
         case MAC_RADIO_BROADCAST_PKT:
             new_packet->type = PHY_RADIO_PKT_BROADCAST;
             break;
