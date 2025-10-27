@@ -23,20 +23,39 @@
 #include "mac_radio.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdarg.h>
+
+// Weakly defined logging function - can be overridden by user
+__attribute__((weak)) void radio_log(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+    vprintf(format, args);
+    va_end(args);
+}
 
 #define DEFAULT_TTL 1
 
-#ifndef LOG
-#define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
+#ifndef MAC_RADIO_ENABLE_LOG
+#define MAC_RADIO_ENABLE_LOG (1)
+#endif /* MAC_RADIO_ENABLE_LOG */
+
+#if MAC_RADIO_ENABLE_LOG == 1
+#define LOG(f_, ...) radio_log((f_), ##__VA_ARGS__)
+#else
+#define LOG(f_, ...)
 #endif
 
-#ifndef LOG_DEBUG
-#define LOG_DEBUG(f_, ...)//printf((f_), ##__VA_ARGS__)
-#endif
+#ifdef MAC_RADIO_LOG_DEBUG_ENABLE
+#define LOG_DEBUG(f_, ...) radio_log((f_), ##__VA_ARGS__)
+#else
+#define LOG_DEBUG(f_, ...)
+#endif /* MAC_RADIO_LOG_DEBUG_ENABLE */
 
-#ifndef LOG_V_DEBUG
-#define LOG_V_DEBUG(f_, ...)// printf((f_), ##__VA_ARGS__)
-#endif
+#ifdef MAC_RADIO_LOG_V_DEBUG_ENABLE
+#define LOG_V_DEBUG(f_, ...) radio_log((f_), ##__VA_ARGS__)
+#else
+#define LOG_V_DEBUG(f_, ...)
+#endif /* MAC_RADIO_LOG_V_DEBUG_ENABLE */
 
 #ifndef UNUSED
 #define UNUSED(x) (void)(x)
