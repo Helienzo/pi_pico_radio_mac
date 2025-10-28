@@ -33,7 +33,7 @@ __attribute__((weak)) void radio_log(const char *format, ...) {
     va_end(args);
 }
 
-#define DEFAULT_TTL 1
+#define DEFAULT_TTL 2
 
 #ifndef MAC_RADIO_LOG_ENABLE
 #define MAC_RADIO_LOG_ENABLE (1)
@@ -425,29 +425,48 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
     return PHY_RADIO_CB_SET_SCAN;
 }
 
+static int32_t manageInternalPackageTimeout(macRadio_t *inst, macRadioPacket_t *pkt) {
+    switch (pkt->pkt_type) {
+        case MAC_RADIO_HANDOVER_PKT:
+            LOG("Handover Timeout\n");
+#ifdef AUTO_SWITCH
+            // Reset the handover counter
+            inst->switch_counter = 20;
+            // TODO This risks creating multiple centrals
+#endif
+            break;
+        case MAC_RADIO_SYNC_ACK_PKT:
+            // Currently we risk getting stuck in CONNECTING state ..
+            // TODO manage this
+            break;
+        case MAC_RADIO_RELIABLE_PKT:
+            break;
+        default:
+            break;
+    }
+
+    return MAC_RADIO_SUCCESS;
+}
+
 static int32_t mapItemCb(staticMap_t *map, staticMapItem_t *map_item) {
     macRadioPktTrackItem_t * track_item = CONTAINER_OF(map_item, macRadioPktTrackItem_t, node);
     macRadio_t * inst = CONTAINER_OF(map, macRadio_t, track_map);
 
     if (track_item->ttl == 0) {
-
-        int32_t res = phyRadioRemoveFromSlot(&inst->phy_instance, track_item->phy_pkt);
-        if (res != PHY_RADIO_SUCCESS) {
-            // Fatal, something is very bad
-            return res;
-        }
-
         // Check if it is an external or internal packet that has timed out
         if (track_item->internal) {
+            int32_t res = MAC_RADIO_SUCCESS;
+            // Manage pkt timeout
+            if ((res = manageInternalPackageTimeout(inst, track_item->mac_pkt)) != MAC_RADIO_SUCCESS) {
+                return res;
+            }
+
             // Release buffers used by internal packets
             res = releaseBufferByMac(inst, track_item->mac_pkt);
             if (res != STATIC_POOL_SUCCESS) {
                 // Fatal, something is very bad
                 return res;
             }
-
-            // TODO should we do something specific when an internal packet times out?
-            // Currently we risk getting stuck in CONNECTING state ..
 
             // Nothing more to do, stop tracking this packet
             return STATIC_MAP_CB_ERASE;
@@ -589,8 +608,12 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
 
     if (res != STATIC_POOL_SUCCESS) {
         // If this fails something is very broken
-        LOG("Failed to return packet to POOL\n");
-        return inst->interface->sent_cb(inst->interface, mac_pkt, MAC_RADIO_POOL_ERROR);
+        LOG("Failed ret pkt to POOL %i %i\n", res, result);
+        if (!mac_interal) {
+            return inst->interface->sent_cb(inst->interface, mac_pkt, MAC_RADIO_POOL_ERROR);
+        } else {
+            return MAC_RADIO_SUCCESS;
+        }
     }
 
     macRadioPktTrackItem_t *track_item = NULL;
@@ -611,7 +634,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
                     // Release the buffer used for this internal message
                     if ((res = releaseBufferByBuf(inst, packet->pkt_buffer)) != STATIC_POOL_SUCCESS) {
                         // This is a fatal error, something is very bad
-                        LOG("Failed to return buffer to POOL\n");
+                        LOG("Failed ret buf to POOL %i\n", res);
                         return res;
                     }
                 }
@@ -637,7 +660,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
                 // Release the buffer used for this internal message
                 if ((res = releaseBufferByBuf(inst, packet->pkt_buffer)) != STATIC_POOL_SUCCESS) {
                     // Fatal, this would be very bad
-                    LOG("Failed to return buffer to POOL\n");
+                    LOG("Failed to ret buf to POOL %i\n", res);
                     return res;
                 }
             }
@@ -920,7 +943,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 LOG_DEBUG("Connected as CENTRAL\n");
 
 #ifdef AUTO_SWITCH
-                inst->switch_counter = 10;
+                inst->switch_counter = 20;
 #endif
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
             } else {
@@ -953,7 +976,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
 
             gpio_put(13, true);
 #ifdef AUTO_SWITCH
-            inst->switch_counter = 10;
+            inst->switch_counter = 20;
 #endif
             res = phyRadioTransitionPeripheralToCentral(&inst->phy_instance);
             if (res != PHY_RADIO_SUCCESS) {
@@ -1257,20 +1280,12 @@ int32_t macRadioSetAutoMode(macRadio_t *inst) {
     // Init the auto mode counter to a random value
     inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
 
-    // Randomly select if to start in cental or peripheral mode
-    if (inst->auto_counter % 2 == 0) {
-        gpio_put(13, false);
-        int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
+    // Allways start in scan
+    gpio_put(13, false);
+    int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
-        if (res != PHY_RADIO_SUCCESS) {
-            return res;
-        }
-    } else {
-        gpio_put(13, true);
-        int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
-        if (res != PHY_RADIO_SUCCESS) {
-            return res;
-        }
+    if (res != PHY_RADIO_SUCCESS) {
+        return res;
     }
 
     inst->mode = MAC_RADIO_AUTO_MODE;
