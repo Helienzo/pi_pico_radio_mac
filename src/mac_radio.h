@@ -234,6 +234,7 @@ typedef struct {
 /**
  * Initialize this module.
  * Input: Pointer to mac radio instance
+ * Input: Pointer to config
  * Input: Pointer to interface
  * Returns: macRadioErr_t
  */

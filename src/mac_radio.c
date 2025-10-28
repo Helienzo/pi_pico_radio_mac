@@ -1142,6 +1142,18 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
     return MAC_RADIO_SUCCESS;
 }
 
+int32_t macRadioDeInit(macRadio_t *inst) {
+    int32_t res = MAC_RADIO_SUCCESS;
+
+    if ((res = phyRadioDeInit(&inst->phy_instance)) != PHY_RADIO_SUCCESS) {
+        LOG("Failed to deinit phy radio\n");
+    }
+
+    memset(inst, 0, sizeof(macRadio_t));
+
+    return MAC_RADIO_SUCCESS;
+}
+
 int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterface_t *interface) {
     if (inst == NULL ||
         interface == NULL ||
@@ -1241,10 +1253,6 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
         return res;
     }
 
-    return MAC_RADIO_SUCCESS;
-}
-
-int32_t macRadioDeInit(macRadio_t *inst) {
     return MAC_RADIO_SUCCESS;
 }
 
