@@ -35,15 +35,15 @@ __attribute__((weak)) void radio_log(const char *format, ...) {
 
 #define DEFAULT_TTL 1
 
-#ifndef MAC_RADIO_ENABLE_LOG
-#define MAC_RADIO_ENABLE_LOG (1)
-#endif /* MAC_RADIO_ENABLE_LOG */
+#ifndef MAC_RADIO_LOG_ENABLE
+#define MAC_RADIO_LOG_ENABLE (1)
+#endif /* MAC_RADIO_LOG_ENABLE */
 
-#if MAC_RADIO_ENABLE_LOG == 1
+#if MAC_RADIO_LOG_ENABLE == 1
 #define LOG(f_, ...) radio_log((f_), ##__VA_ARGS__)
 #else
 #define LOG(f_, ...)
-#endif
+#endif /* MAC_RADIO_LOG_ENABLE */
 
 #ifdef MAC_RADIO_LOG_DEBUG_ENABLE
 #define LOG_DEBUG(f_, ...) radio_log((f_), ##__VA_ARGS__)
