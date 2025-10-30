@@ -25,6 +25,8 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
+#define AUTO_SWITCH
+
 // Weakly defined logging function - can be overridden by user
 __attribute__((weak)) void radio_log(const char *format, ...) {
     va_list args;
@@ -431,7 +433,7 @@ static int32_t manageInternalPackageTimeout(macRadio_t *inst, macRadioPacket_t *
             LOG("Handover Timeout\n");
 #ifdef AUTO_SWITCH
             // Reset the handover counter
-            inst->switch_counter = 20;
+            inst->switch_counter = 4;
             // TODO This risks creating multiple centrals
 #endif
             break;
@@ -943,7 +945,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 LOG_DEBUG("Connected as CENTRAL\n");
 
 #ifdef AUTO_SWITCH
-                inst->switch_counter = 20;
+                inst->switch_counter = 4;
 #endif
                 cb_retval = inst->interface->conn_cb(inst->interface, new_connection);
             } else {
@@ -976,7 +978,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
 
             gpio_put(13, true);
 #ifdef AUTO_SWITCH
-            inst->switch_counter = 20;
+            inst->switch_counter = 4;
 #endif
             res = phyRadioTransitionPeripheralToCentral(&inst->phy_instance);
             if (res != PHY_RADIO_SUCCESS) {
@@ -1244,8 +1246,9 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
         }
     }
     // Set the interval and end guard
-    inst->frame_config.sync_interval = MAC_RADIO_SYNC_INTERVAL;
-    inst->frame_config.end_guard     = PHY_RADIO_FRAME_GUARD_US;
+    inst->frame_config.sync_interval     = MAC_RADIO_SYNC_INTERVAL;
+    inst->frame_config.end_guard         = PHY_RADIO_FRAME_GUARD_US;
+    inst->frame_config.slot_end_guard_us = PHY_RADIO_SLOT_END_GUARD_US;
 
     // Configure TDMA frame, note that the casting from const to non const here is not great
     if ((res = phyRadioSetFrameStructure(&inst->phy_instance, &inst->frame_config)) != PHY_RADIO_SUCCESS) {
