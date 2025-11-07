@@ -272,7 +272,10 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
         // Check if it is time to switch mode
         if (inst->auto_counter == 0) {
 
-            gpio_put(13, false);
+#ifdef MAC_RADIO_MODE_DBG_LED
+            gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
             // Switch to scan mode
             int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
@@ -412,8 +415,12 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
 
     // Manage auto mode
     if (inst->mode == MAC_RADIO_AUTO_MODE) {
+
+#ifdef MAC_RADIO_MODE_DBG_LED
+        gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
         // If we are in auto mode return to scan on disconnect
-        gpio_put(13, false);
         int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
         if (res != PHY_RADIO_SUCCESS) {
             return res;
@@ -421,9 +428,12 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
         return PHY_RADIO_CB_SUCCESS;
     }
 
+#ifdef MAC_RADIO_MODE_DBG_LED
+    gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
     // Inform the phy layer to return to scan mode
-    gpio_put(13, false);
     return PHY_RADIO_CB_SET_SCAN;
 }
 
@@ -524,7 +534,10 @@ static int32_t manageCentralConflictingSync(macRadio_t *inst, const phyRadioSync
         return res;
     }
 
-    gpio_put(13, false);
+#ifdef MAC_RADIO_MODE_DBG_LED
+    gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
     // Inform phy to enter scan mode
     return PHY_RADIO_CB_SET_SCAN;
 }
@@ -539,8 +552,11 @@ static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sy
     // Re-Init the auto mode counter to a random value
     inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
 
+#ifdef MAC_RADIO_MODE_DBG_LED
+    gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, true);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
     // Switch to central mode
-    gpio_put(13, true);
     int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
     if (res != PHY_RADIO_SUCCESS) {
         return res;
@@ -763,7 +779,10 @@ static int32_t manageAckPkt(macRadio_t * inst, uint32_t src_addr, macRadioPktTra
                 break;
             }
 
-            gpio_put(13, false);
+#ifdef MAC_RADIO_MODE_DBG_LED
+            gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
             res = phyRadioTransitionCentralToPeripheral(&inst->phy_instance, inst->central_addr);
             if (res != PHY_RADIO_SUCCESS) {
                 return res;
@@ -826,8 +845,11 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
 
     switch(inst->mode) {
         case MAC_RADIO_PERIPHERAL: {
+#ifdef MAC_RADIO_MODE_DBG_LED
+        gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
             // Return the phy to scan mode
-        gpio_put(13, false);
             int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
             if (res != PHY_RADIO_SUCCESS) {
                 return res;
@@ -835,8 +857,11 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
             LOG("Explicit disconnect requested\n");
         } break;
         case MAC_RADIO_AUTO_MODE: {
+#ifdef MAC_RADIO_MODE_DBG_LED
+        gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
             // Restart scan mode
-        gpio_put(13, false);
             int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
             if (res != PHY_RADIO_SUCCESS) {
@@ -976,7 +1001,10 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 return res;
             }
 
-            gpio_put(13, true);
+#ifdef MAC_RADIO_MODE_DBG_LED
+            gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, true);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
 #ifdef AUTO_SWITCH
             inst->switch_counter = 4;
 #endif
@@ -1168,6 +1196,11 @@ int32_t macRadioInit(macRadio_t *inst, macRadioConfig_t config, macRadioInterfac
         return MAC_RADIO_NULL_ERROR;
     }
 
+#ifdef MAC_RADIO_MODE_DBG_LED
+    gpio_init(MAC_RADIO_MODE_DBG_LED_PIN);
+    gpio_set_dir(MAC_RADIO_MODE_DBG_LED_PIN, GPIO_OUT);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
     // Make sure that the entire memory area is correctly initialized to 0
     memset(inst, 0, sizeof(macRadio_t));
 
@@ -1291,8 +1324,11 @@ int32_t macRadioSetAutoMode(macRadio_t *inst) {
     // Init the auto mode counter to a random value
     inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
 
+#ifdef MAC_RADIO_MODE_DBG_LED
+    gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
     // Allways start in scan
-    gpio_put(13, false);
     int32_t res = phyRadioSetScanMode(&inst->phy_instance, (rand() % MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS) + MAC_RADIO_MIN_SCAN_TIMEOUT_MS);
 
     if (res != PHY_RADIO_SUCCESS) {
@@ -1321,7 +1357,10 @@ int32_t macRadioSetCentralMode(macRadio_t *inst) {
             break;
     }
 
-        gpio_put(13, true);
+#ifdef MAC_RADIO_MODE_DBG_LED
+        gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, true);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
     int32_t res = phyRadioSetCentralMode(&inst->phy_instance);
     if (res != PHY_RADIO_SUCCESS) {
         return res;
@@ -1354,7 +1393,10 @@ int32_t macRadioSetPeripheralMode(macRadio_t *inst) {
             break;
     }
 
-    gpio_put(13, false);
+#ifdef MAC_RADIO_MODE_DBG_LED
+    gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
     int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
 
     if (res != PHY_RADIO_SUCCESS) {
