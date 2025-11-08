@@ -25,8 +25,6 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
-#define AUTO_SWITCH
-
 // Weakly defined logging function - can be overridden by user
 __attribute__((weak)) void radio_log(const char *format, ...) {
     va_list args;
@@ -168,7 +166,7 @@ static macRadioConnItem_t* newConnection(staticMap_t *map, uint32_t conn_id) {
 
     conn_item->conn_state     = MAC_RADIO_DISCONNECTED;
     conn_item->last_heard     = 0;
-    conn_item->targen_tx_slot = 0;
+    conn_item->target_tx_slot = 0;
     conn_item->target_addr    = conn_id;
 
     return conn_item;
@@ -207,6 +205,18 @@ static int32_t disconnectAndNotify(macRadio_t *inst, macRadioConnItem_t *connect
     }
 
     connection->conn_state = MAC_RADIO_DISCONNECTED;
+
+    // Clear the slot used by this connection
+    // Slot numbers are 1-indexed, bit positions are 0-indexed
+    if (connection->target_tx_slot >= 1) {
+        inst->slot_config_data[0] &= ~(1 << (connection->target_tx_slot - 1));
+
+        // Update the PHY layer with the new slot configuration
+        int32_t res = phyRadioSetCustomData(&inst->phy_instance, inst->slot_config_data, PHY_RADIO_SYNC_GEN_DATA_SIZE);
+        if (res != PHY_RADIO_SUCCESS) {
+            return res;
+        }
+    }
 
     // Trigger connection Callback
     macRadioConn_t new_connection = {
@@ -313,13 +323,6 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
 // TODO this is very hardcoded ..
 static int32_t configureMySlots(macRadio_t *inst) {
     int32_t res = MAC_RADIO_SUCCESS;
-    if (inst->current_config.my_address == 1) {
-        inst->my_tx_slot  = 1; //sync_state->tx_slot_number;
-    } else if (inst->current_config.my_address == 2) {
-        inst->my_tx_slot  = 2; //sync_state->tx_slot_number;
-    } else if (inst->current_config.my_address == 3) {
-        inst->my_tx_slot  = 3; //sync_state->tx_slot_number;
-    }
 
     for (int i = 1; i < PHY_RADIO_NUM_SLOTS; i++) {
         // Receive on slot 1 indefinetly
@@ -332,14 +335,81 @@ static int32_t configureMySlots(macRadio_t *inst) {
     return res;
 }
 
+static int32_t manageSlotDataFromCentral(macRadio_t *inst, uint8_t slot_data, macRadioConnItem_t* central_con) {
+
+    // Check what slot the central device is using (bits 7-5)
+    uint8_t central_slot = (slot_data >> 5) & 0x07;
+
+    // Store what tx slot is used by the central
+    central_con->target_tx_slot = central_slot;
+
+    // Store the central's slot in our local slot_config_data (bits 7-5)
+    inst->slot_config_data[0] = (central_slot & 0x07) << 5;
+
+    // Check available slots (bits 4-0)
+    // Bit = 1 means occupied, bit = 0 means free
+    uint8_t free_slots_mask = slot_data & 0x1F;
+
+    // Mark the central's slot as occupied in our local mask
+    // Slot numbers are 1-indexed, bit positions are 0-indexed
+    inst->slot_config_data[0] |= (1 << (central_slot - 1));
+
+    // Find first available slot (where bit is 0)
+    // __builtin_ctz counts trailing zeros, so invert the mask first
+    int available_bit = __builtin_ctz(~free_slots_mask);
+
+    // Check if the available slot is within valid range
+    if (available_bit < inst->current_config.num_data_slots) {
+        // Convert bit position to slot number (slots are 1-indexed)
+        inst->my_tx_slot = available_bit + 1;
+
+        // Mark this slot as occupied in our local mask
+        inst->slot_config_data[0] |= (1 << available_bit);
+    } else {
+        // No available slots
+        return MAC_RADIO_NO_SLOTS;
+    }
+
+    return MAC_RADIO_SUCCESS;
+}
+
+static int32_t setCentralSlot(macRadio_t *inst, uint8_t slot) {
+    if (slot < 1) {
+        return MAC_RADIO_INVALID_ERROR;
+    }
+
+    // Set what slot is used by the central (bits 7-5)
+    inst->slot_config_data[0] = (slot & 0x07) << 5;
+
+    // Mark the central's slot as occupied in the free_slots_mask (bits 4-0)
+    // Bit = 1 means occupied, bit = 0 means free
+    // Slot numbers are 1-indexed, bit positions are 0-indexed
+    inst->slot_config_data[0] |= (1 << (slot - 1));
+
+    inst->my_tx_slot = slot;
+
+    return MAC_RADIO_SUCCESS;
+}
+
 static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // Try to create a new connection instance
     macRadioConnItem_t* new_conn = getOrCreateNewConnection(&inst->connections, sync_state->central_address);
+
     // We are out of available connections
     if (new_conn == NULL) {
         LOG("Out of connections!\n");
         return MAC_RADIO_NEW_CONN_ERR;
     }
+    LOG("First SYNC\n");
+
+    int32_t res = manageSlotDataFromCentral(inst, sync_state->custom_data[0], new_conn);
+    if (res != MAC_RADIO_SUCCESS) {
+        LOG("NO SLOT %i \n", sync_state->custom_data[0]);
+        // There are no slots available
+        return MAC_RADIO_SUCCESS;
+    }
+
+    LOG("SLOT %i \n", inst->my_tx_slot);
 
     // New sync detected
     new_conn->conn_state = MAC_RADIO_CONNECTING;
@@ -348,13 +418,7 @@ static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncSta
     new_conn->target_addr = sync_state->central_address;
 
     // Configure my slots
-    int32_t res = configureMySlots(inst);
-    if (res != MAC_RADIO_SUCCESS) {
-        return res;
-    }
-
-    // Trigger a connect request
-    res = InternalSendOnConnection(inst, MAC_RADIO_SYNC_ACK_PKT, 0, new_conn->target_addr);
+    res = configureMySlots(inst);
     if (res != MAC_RADIO_SUCCESS) {
         return res;
     }
@@ -371,13 +435,14 @@ static int32_t managePeripheralReSync(macRadio_t *inst, const phyRadioSyncState_
         return MAC_RADIO_NO_CONN_ERROR;
     }
 
-    // Check if we have allready tried to connect
+    // Check if we are connecting, if so send a sync_ack
     if (conn->conn_state == MAC_RADIO_CONNECTING) {
-        // Our last synack must have gotten lost, retrigger connect
-        return managePeripheralFirstSync(inst, sync_state);
+        // Trigger a connect request
+        return InternalSendOnConnection(inst, MAC_RADIO_SYNC_ACK_PKT, 0, conn->target_addr);
     }
 
     // If we are connected send a keep alive, to notify the central that we exist
+    // TODO we should only do this if we are not sending regular packets ..
     if (conn->conn_state == MAC_RADIO_CONNECTED) {
         // Trigger an alive packet
         int32_t res = MAC_RADIO_SUCCESS;
@@ -561,6 +626,14 @@ static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sy
     if (res != PHY_RADIO_SUCCESS) {
         return res;
     }
+
+    // Configure the central to use slot
+    if ((res = setCentralSlot(inst, MAC_RADIO_CENTRAL_SLOT)) != MAC_RADIO_SUCCESS) {
+        return res;
+    }
+
+    // Set all slots as available in the sync message
+    res = phyRadioSetCustomData(&inst->phy_instance, inst->slot_config_data, PHY_RADIO_SYNC_GEN_DATA_SIZE);
 
     res = configureMySlots(inst);
     if (res != MAC_RADIO_SUCCESS) {
@@ -878,6 +951,25 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
     return MAC_RADIO_CB_SUCCESS;
 }
 
+int32_t managePeripheralSlot(macRadio_t *inst, uint8_t slot, macRadioConnItem_t* peripheral_conn) {
+    if (slot < 1 || slot > inst->current_config.num_data_slots) {
+        return MAC_RADIO_INVALID_ERROR;
+    }
+
+    int32_t res = MAC_RADIO_SUCCESS;
+
+    inst->slot_config_data[0] |= 1 << (slot - 1);
+
+    peripheral_conn->target_tx_slot = slot;
+
+    if ((res = phyRadioSetCustomData(&inst->phy_instance, inst->slot_config_data, PHY_RADIO_SYNC_GEN_DATA_SIZE)) != PHY_RADIO_SUCCESS) {
+        return res;
+    }
+
+    return MAC_RADIO_SUCCESS;
+}
+
+
 static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_t *packet) {
     macRadio_t * inst = CONTAINER_OF(interface, macRadio_t, phy_interface);
 
@@ -955,6 +1047,10 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 conn->conn_state = MAC_RADIO_CONNECTED;
                 conn->target_addr = packet->addr; // Get the address of requesting device
                 LOG_DEBUG("ACK %i\n", packet->addr);
+
+                if ((res = managePeripheralSlot(inst, packet->slot, conn)) != MAC_RADIO_SUCCESS) {
+                    return res;
+                }
 
                 if ((res = InternalSendOnConnection(inst, MAC_RADIO_ACK_PKT, msg_id, conn->target_addr)) != MAC_RADIO_SUCCESS) {
                     return res;
@@ -1090,11 +1186,16 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
         msg_id = use_msg_id;
     }
 
+    bool this_frame = false;
+
     macRadioPktTrackItem_t* track_item = NULL;
     switch(packet_type) {
         case MAC_RADIO_RELIABLE_PKT:
         case MAC_RADIO_HANDOVER_PKT:
         case MAC_RADIO_SYNC_ACK_PKT:
+            // This packet should be sent this frame
+            this_frame = true;
+
             // Keep track of this packet, wait for acknowlagement
             track_item = trackMacPacket(&inst->track_map, &buffer_item->mac_pkt, msg_id);
             if (track_item == NULL) {
@@ -1145,8 +1246,14 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
     new_packet->slot       = inst->my_tx_slot;
     new_packet->type       = PHY_RADIO_PKT_DIRECT;
 
-    // Send the packet, if the tx queue is full errors will be returned
-    res = phyRadioSendOnSlot(&inst->phy_instance, new_packet);
+    if (this_frame) {
+        // Send the packet during this frame, if the tx queue is full errors will be returned
+        res = phyRadioSendOnSlotThisFrame(&inst->phy_instance, new_packet);
+    } else {
+        // Send the packet, if the tx queue is full errors will be returned
+        res = phyRadioSendOnSlot(&inst->phy_instance, new_packet);
+    }
+
     if (res != PHY_RADIO_SUCCESS) {
         // Release all allocated resources
         int32_t result = MAC_RADIO_SUCCESS;
@@ -1365,6 +1472,14 @@ int32_t macRadioSetCentralMode(macRadio_t *inst) {
     if (res != PHY_RADIO_SUCCESS) {
         return res;
     }
+
+    // Configure the central to use slot
+    if ((res = setCentralSlot(inst, MAC_RADIO_CENTRAL_SLOT)) != MAC_RADIO_SUCCESS) {
+        return res;
+    }
+
+    // Set all slots as available in the sync message
+    res = phyRadioSetCustomData(&inst->phy_instance, inst->slot_config_data, PHY_RADIO_SYNC_GEN_DATA_SIZE);
 
     res = configureMySlots(inst);
     if (res != MAC_RADIO_SUCCESS) {
