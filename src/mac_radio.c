@@ -331,7 +331,6 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
     return PHY_RADIO_CB_SUCCESS;
 }
 
-// TODO this is very hardcoded ..
 static int32_t configureMySlots(macRadio_t *inst) {
     int32_t res = MAC_RADIO_SUCCESS;
 
