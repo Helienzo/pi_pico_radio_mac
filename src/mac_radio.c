@@ -67,7 +67,7 @@ __attribute__((weak)) void radio_log(const char *format, ...) {
 #define MAC_RADIO_MIN_SCAN_TIMEOUT_MS     (5*5*8)
 
 static int32_t clearSlotFromConfig(macRadio_t *inst, uint8_t slot);
-static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id, uint32_t target_addr);
+static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id, uint8_t target_addr);
 
 static int32_t releasePacketByPhy(macRadio_t *inst, phyRadioPacket_t *packet) {
     // Get the Packetitem associated with this packet
@@ -263,13 +263,12 @@ static int32_t connItemCb(staticMap_t *map, staticMapItem_t *map_item) {
     return STATIC_MAP_CB_NEXT;
 }
 
-static uint32_t an_addr = 0;
 static int32_t nextDeviceCb(staticMap_t *map, staticMapItem_t *map_item) {
     macRadioConnItem_t* conn_item = CONTAINER_OF(map_item, macRadioConnItem_t, node);
     macRadio_t * inst = CONTAINER_OF(map, macRadio_t, connections);
 
     if (conn_item->conn_state == MAC_RADIO_CONNECTED) {
-        an_addr = conn_item->target_addr;
+        inst->switch_addr = conn_item->target_addr;
 
         if (rand() % 2 == 0) {
             return STATIC_MAP_CB_STOP;
@@ -320,7 +319,7 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
                 return res;
             }
 
-            res = macRadioSwitchCentral(inst, an_addr);
+            res = macRadioSwitchCentral(inst, inst->switch_addr);
             if (res != MAC_RADIO_SUCCESS) {
                 return res;
             }
@@ -1188,7 +1187,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
     return PHY_RADIO_CB_SUCCESS;
 }
 
-static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id, uint32_t target_addr) {
+static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id, uint8_t target_addr) {
     if (inst == NULL) {
         return MAC_RADIO_NULL_ERROR;
     }
@@ -1681,7 +1680,7 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
 }
 
 
-int32_t macRadioSwitchCentral(macRadio_t *inst, uint32_t next_central_addr) {
+int32_t macRadioSwitchCentral(macRadio_t *inst, uint8_t next_central_addr) {
     if (inst == NULL) {
         return MAC_RADIO_NULL_ERROR;
     }

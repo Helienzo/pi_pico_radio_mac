@@ -195,11 +195,11 @@ typedef struct {
 } macRadioPktTrackItem_t;
 
 typedef struct {
-    uint32_t last_heard; // Last time we heard from a device
-    uint32_t conn_state;
-    uint32_t target_tx_slot ;
-    uint32_t target_addr;
-    staticMapItem_t   node;
+    uint32_t        last_heard; // Last time we heard from a device
+    uint32_t        conn_state;
+    uint8_t         target_tx_slot;
+    uint8_t         target_addr;
+    staticMapItem_t node;
 } macRadioConnItem_t;
 
 typedef struct {
@@ -208,13 +208,13 @@ typedef struct {
     macRadioMode_t   mode;
     uint8_t          auto_counter;
     uint8_t          switch_counter;
+    uint8_t          switch_addr;
 
     // Frame configuration
     phyRadioFrameConfig_t frame_config;
 
     // Connection management
-    uint8_t        central_addr;
-
+    uint8_t            central_addr;
     uint8_t            my_tx_slot; // Each device only has one TX slot
     staticMap_t        connections;
     staticMapItem_t*   _array[MAC_RADIO_MAX_NUM_CONNECTIONS];
@@ -312,7 +312,7 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet);
  * Input: The address to the next device intended as central
  * Returns: macRadioErr_t
  */
-int32_t macRadioSwitchCentral(macRadio_t *inst, uint32_t next_central_addr);
+int32_t macRadioSwitchCentral(macRadio_t *inst, uint8_t next_central_addr);
 
 #ifdef __cplusplus
 }
