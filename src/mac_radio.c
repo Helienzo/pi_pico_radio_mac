@@ -33,7 +33,7 @@ __attribute__((weak)) void radio_log(const char *format, ...) {
     va_end(args);
 }
 
-#define DEFAULT_TTL 2
+#define DEFAULT_TTL 1
 
 #ifndef MAC_RADIO_LOG_ENABLE
 #define MAC_RADIO_LOG_ENABLE (1)
@@ -1278,13 +1278,8 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
     new_packet->slot       = inst->my_tx_slot;
     new_packet->type       = PHY_RADIO_PKT_DIRECT;
 
-    if (this_frame) {
-        // Send the packet during this frame, if the tx queue is full errors will be returned
-        res = phyRadioSendOnSlotThisFrame(&inst->phy_instance, new_packet);
-    } else {
-        // Send the packet, if the tx queue is full errors will be returned
-        res = phyRadioSendOnSlot(&inst->phy_instance, new_packet);
-    }
+    // Send the packet, if the tx queue is full errors will be returned
+    res = phyRadioSendOnSlot(&inst->phy_instance, new_packet, this_frame);
 
     if (res != PHY_RADIO_SUCCESS) {
         // Release all allocated resources
@@ -1663,7 +1658,7 @@ int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet) {
     }
 
     // Send the packet, if the tx queue is full errors will be returned
-    res = phyRadioSendOnSlot(&inst->phy_instance, new_packet);
+    res = phyRadioSendOnSlot(&inst->phy_instance, new_packet, false);
     if (res != PHY_RADIO_SUCCESS) {
         // Release all allocated resources
         int32_t result = MAC_RADIO_SUCCESS;
