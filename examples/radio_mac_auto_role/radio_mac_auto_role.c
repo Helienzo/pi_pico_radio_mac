@@ -2,6 +2,7 @@
 #include "mac_radio.h"
 #include "hal_gpio.h"
 #include "pico_bootsel_button.h"
+#include "logger.h"
 
 /*
  This example demonstrates how to use the macRadio module in automatic role mode, the device will alternate
@@ -23,9 +24,12 @@
 #define RADIO_MY_ADDR         (0x01)
 #define RADIO_TX_BUFFER_SIZE  (128 + C_BUFFER_ARRAY_OVERHEAD) 
 #define PKT_LED               (13)
+// Forward declaration of radio_log
+void radio_log(const char *format, ...);
 
+// Main logging using DMA logger
 #ifndef LOG
-#define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
+#define LOG(f_, ...) radio_log((f_), ##__VA_ARGS__)
 #endif
 
 uint8_t msg[] = {'H', 'e', 'l', 'l', 'o', '!'};
@@ -48,6 +52,10 @@ typedef struct mainCtx {
     // LED management
     bool led_state;
     bool test_led_state;
+
+    // Connection tracking
+    uint32_t active_conn_ids[MAC_RADIO_MAX_NUM_CONNECTIONS]; // Store active connection IDs
+    uint32_t active_connections; // Count of active connections
 } mainCtx_t;
 
 // Local variables
@@ -121,20 +129,49 @@ int32_t connStateCb(macRadioInterface_t *interface, macRadioConn_t conn_state) {
     // Check the updated connection state
     switch(conn_state.conn_state) {
         case MAC_RADIO_CONNECTED:
-            LOG("CONNECTED\n");
-            inst->led_state = true;
+            LOG("CONNECTED (conn_id: %d)\n", conn_state.conn_id);
+
+            inst->packet.conn_id = conn_state.conn_id;
+
+            // Add connection if not already tracked
+            bool already_tracked = false;
+            for (uint32_t i = 0; i < inst->active_connections; i++) {
+                if (inst->active_conn_ids[i] == conn_state.conn_id) {
+                    already_tracked = true;
+                    break;
+                }
+            }
+
+            if (!already_tracked && inst->active_connections < MAC_RADIO_MAX_NUM_CONNECTIONS) {
+                inst->active_conn_ids[inst->active_connections] = conn_state.conn_id;
+                inst->active_connections++;
+            }
             break;
+
         case MAC_RADIO_DISCONNECTED:
-            LOG("DISCONNECTED\n");
-            inst->led_state = false;
+            LOG("DISCONNECTED (conn_id: %d)\n", conn_state.conn_id);
+
+            // Remove connection from tracking
+            for (uint32_t i = 0; i < inst->active_connections; i++) {
+                if (inst->active_conn_ids[i] == conn_state.conn_id) {
+                    // Shift remaining connections down
+                    for (uint32_t j = i; j < inst->active_connections - 1; j++) {
+                        inst->active_conn_ids[j] = inst->active_conn_ids[j + 1];
+                    }
+                    inst->active_connections--;
+                    break;
+                }
+            }
             break;
+
         default:
             return MAC_RADIO_CB_ERROR;
     }
 
-    inst->packet.conn_id = conn_state.conn_id;
-
+    // Only turn LED on if we have at least one active connection
+    inst->led_state = (inst->active_connections > 0);
     pico_set_led(inst->led_state);
+
     return MAC_RADIO_CB_SUCCESS;
 }
 
@@ -210,6 +247,18 @@ static int32_t respCb(macRadioInterface_t *interface, macRadioPacket_t *packet, 
     return MAC_RADIO_CB_SUCCESS;
 }
 
+// Override the weak radio_log function to use DMA logger
+void radio_log(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    char buffer[256];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    loggerPrintf("%s", buffer);
+
+    va_end(args);
+}
+
 int main() {
     stdio_init_all(); // To be able to use printf
     // Initialize the gpio module to make sure all modules can use it
@@ -217,6 +266,13 @@ int main() {
     int rc = pico_led_init();
     hard_assert(rc == PICO_OK);
 
+    // Initialize the DMA-based non-blocking logger
+    if (loggerInit() != 0) {
+        // Fallback to USB stdio if logger fails
+        printf("Logger init failed!\n");
+    }
+
+    pico_set_led(true);
     // Prepare bootsel button
     main_instance.btn_interface.event_cb = buttonEventCb;
     int32_t res = picoBootSelButtonInit(&main_instance.boot_button, &main_instance.btn_interface);
@@ -233,6 +289,8 @@ int main() {
 
     macRadioConfig_t mac_config = {
         .my_address = RADIO_MY_ADDR,
+        .num_data_slots = MAC_RADIO_MAX_NUM_CONNECTIONS + 1,
+
     };
 
     // Initialize the radio
@@ -266,6 +324,8 @@ int main() {
         LOG("Set Mode Failed\n");
         device_error();
     }
+
+    pico_set_led(false);
 
     // Process forever
     while (true) {

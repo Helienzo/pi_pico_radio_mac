@@ -25,6 +25,8 @@ endif()
 # ====================================================================================
 set(PICO_BOARD pico2 CACHE STRING "Board type")
 
+include_directories(BEFORE logger)
+
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
@@ -100,14 +102,22 @@ add_subdirectory(${MODULE_PATH} libs/pi_pico_radio_mac)
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(radio_mac_peripheral radio_mac_peripheral.c )
+add_executable(radio_mac_peripheral radio_mac_peripheral.c logger/logger.c)
 
 pico_set_program_name(radio_mac_peripheral "radio_mac_peripheral")
 pico_set_program_version(radio_mac_peripheral "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(radio_mac_peripheral 1)
+pico_enable_stdio_uart(radio_mac_peripheral 0)
 pico_enable_stdio_usb(radio_mac_peripheral 1)
+
+# Set phy and hal library configurations
+target_compile_definitions(radio_mac_peripheral PRIVATE
+    HAL_RADIO_MAX_BUFFER_SIZE=255
+    PHY_RADIO_BIT_RATE=HAL_RADIO_BITRATE_300
+    HAL_RADIO_SLOT_GPIO_DEBUG=1
+    HAL_RADIO_PIN_TX_RX=12
+)
 
 # Add the standard library to the build
 target_link_libraries(radio_mac_peripheral
@@ -122,6 +132,9 @@ target_include_directories(radio_mac_peripheral PRIVATE
 target_link_libraries(radio_mac_peripheral 
         hardware_spi
         hardware_pwm
+        hardware_uart
+        hardware_dma
+        hardware_irq
         rp2x_rfm69_lib
         c_buffer
         pi_pico_gpio_hal

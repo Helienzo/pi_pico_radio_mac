@@ -56,6 +56,24 @@ extern "C" {
 #define MAC_RADIO_MAP_SIZE (5)
 #endif /* MAC_RADIO_MAP_SIZE */
 
+#ifndef MAC_RADIO_MAX_NUM_CONNECTIONS
+#define MAC_RADIO_MAX_NUM_CONNECTIONS (2)
+#endif /* MAC_RADIO_MAX_NUM_CONNECTIONS */
+
+#ifndef MAC_RADIO_SYNC_INTERVAL
+#define MAC_RADIO_SYNC_INTERVAL (2)
+#endif /* MAC_RADIO_SYNC_INTERVAL */
+
+#ifndef MAC_RADIO_CENTRAL_SLOT
+#define MAC_RADIO_CENTRAL_SLOT (1)
+#endif /* MAC_RADIO_CENTRAL_SLOT */
+
+#ifdef MAC_RADIO_MODE_DBG_LED
+#ifndef MAC_RADIO_MODE_DBG_LED_PIN
+#define MAC_RADIO_MODE_DBG_LED_PIN (13)
+#endif /* MAC_RADIO_MODE_DBG_LED_PIN */
+#endif /* MAC_RADIO_MODE_DBG_LED */
+
 // Max Number of missed keep alive from peripheral before a disconnect is triggered
 #define MAC_RADIO_SYNC_TIMEOUT (PHY_RADIO_SYNC_TIMEOUT) // Use the same as Peripheral timeout
 
@@ -70,6 +88,8 @@ typedef enum {
     MAC_RADIO_NO_CONN_ERROR = -30010,
     MAC_RADIO_PKT_TIMEOUT   = -30011,
     MAC_RADIO_UNKONWN_ACK   = -30012,
+    MAC_RADIO_NEW_CONN_ERR  = -30013,
+    MAC_RADIO_NO_SLOTS      = -30014,
 } macRadioErr_t;
 
 typedef enum {
@@ -107,6 +127,7 @@ typedef enum {
     MAC_RADIO_STREAM_PKT,    // This packet is not acknowlaged
     MAC_RADIO_BROADCAST_PKT, // This packet is heard by any listener
     MAC_RADIO_CLOSE_PKT,
+    MAC_RADIO_HANDOVER_PKT,
 } macRadioPacketType_t;
 
 typedef enum {
@@ -141,6 +162,7 @@ struct macRadioInterface {
 
 typedef struct {
     uint8_t my_address;
+    uint8_t num_data_slots;
 } macRadioConfig_t;
 
 struct macRadioConn {
@@ -165,6 +187,7 @@ typedef struct {
 
 typedef struct {
     macRadioPacket_t *mac_pkt;
+    phyRadioPacket_t *phy_pkt;
     uint32_t          ttl;
     bool              sent;
     bool              internal;
@@ -172,19 +195,33 @@ typedef struct {
 } macRadioPktTrackItem_t;
 
 typedef struct {
+    uint32_t        last_heard; // Last time we heard from a device
+    uint32_t        conn_state;
+    uint8_t         target_tx_slot;
+    uint8_t         target_addr;
+    staticMapItem_t node;
+} macRadioConnItem_t;
+
+typedef struct {
     // Mode and configuration
     macRadioConfig_t current_config;
     macRadioMode_t   mode;
     uint8_t          auto_counter;
+    uint8_t          switch_counter;
+    uint8_t          switch_addr;
+
+    // Frame configuration
+    phyRadioFrameConfig_t frame_config;
 
     // Connection management
-    uint8_t        central_addr;
-    struct {
-        uint32_t last_heard; // Last time we heard from a device
-        uint32_t conn_state;
-        uint32_t my_tx_slot;
-        uint32_t target_addr;
-    } connections;
+    uint8_t            central_addr;
+    uint8_t            my_tx_slot; // Each device only has one TX slot
+    staticMap_t        connections;
+    staticMapItem_t*   _array[MAC_RADIO_MAX_NUM_CONNECTIONS];
+    macRadioConnItem_t _con_items[MAC_RADIO_MAX_NUM_CONNECTIONS];
+
+    // Slot access configuration
+    uint8_t            slot_config_data[PHY_RADIO_SYNC_GEN_DATA_SIZE];
 
     // Internal Packet management
     macRadioBufferPoolItem_t _buffer_pkt_pool[MAC_RADIO_POOL_SIZE];
@@ -211,6 +248,7 @@ typedef struct {
 /**
  * Initialize this module.
  * Input: Pointer to mac radio instance
+ * Input: Pointer to config
  * Input: Pointer to interface
  * Returns: macRadioErr_t
  */
@@ -266,6 +304,15 @@ int32_t macRadioSetPeripheralMode(macRadio_t *inst);
  * Returns: macRadioErr_t
  */
 int32_t macRadioSendOnConnection(macRadio_t *inst, macRadioPacket_t *packet);
+
+/**
+ * Handover the central role to another device, only valid if this device currently is central
+ * If this succeeds this device will become peripheral
+ * Input: Pointer to mac radio instance
+ * Input: The address to the next device intended as central
+ * Returns: macRadioErr_t
+ */
+int32_t macRadioSwitchCentral(macRadio_t *inst, uint8_t next_central_addr);
 
 #ifdef __cplusplus
 }
