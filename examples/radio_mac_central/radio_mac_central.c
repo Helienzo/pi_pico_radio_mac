@@ -2,6 +2,7 @@
 #include "mac_radio.h"
 #include "hal_gpio.h"
 #include "pico_bootsel_button.h"
+#include "logger.h"
 
 /*
  This example demonstrates how to use the macRadio module as a central device.
@@ -23,8 +24,12 @@
 #define RADIO_TX_BUFFER_SIZE  (128 + C_BUFFER_ARRAY_OVERHEAD) 
 #define PKT_LED               (13)
 
+// Forward declaration of radio_log
+void radio_log(const char *format, ...);
+
+// Main logging using DMA logger
 #ifndef LOG
-#define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
+#define LOG(f_, ...) radio_log((f_), ##__VA_ARGS__)
 #endif
 
 uint8_t msg[] = {'H', 'e', 'l', 'l', 'o', '!'};
@@ -209,12 +214,30 @@ static int32_t respCb(macRadioInterface_t *interface, macRadioPacket_t *packet, 
     return MAC_RADIO_CB_SUCCESS;
 }
 
+// Override the weak radio_log function to use DMA logger
+void radio_log(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    char buffer[256];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    loggerPrintf("%s", buffer);
+
+    va_end(args);
+}
+
 int main() {
     stdio_init_all(); // To be able to use printf
     // Initialize the gpio module to make sure all modules can use it
     halGpioInit();
     int rc = pico_led_init();
     hard_assert(rc == PICO_OK);
+
+    // Initialize the DMA-based non-blocking logger
+    if (loggerInit() != 0) {
+        // Fallback to USB stdio if logger fails
+        printf("Logger init failed!\n");
+    }
 
     // Prepare bootsel button
     main_instance.btn_interface.event_cb = buttonEventCb;
@@ -232,7 +255,7 @@ int main() {
 
     macRadioConfig_t mac_config = {
         .my_address = RADIO_MY_ADDR,
-        .num_data_slots = 2,
+        .num_data_slots = MAC_RADIO_MAX_NUM_CONNECTIONS + 1,
     };
 
     // Initialize the radio

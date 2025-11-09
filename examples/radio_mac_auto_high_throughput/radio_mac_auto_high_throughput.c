@@ -1,6 +1,7 @@
 #include "pico/stdlib.h"
 #include "mac_radio.h"
 #include "hal_gpio.h"
+#include "logger.h"
 #include "pico_bootsel_button.h"
 
 /*
@@ -27,8 +28,12 @@
 #define PKT_LED                   (13)
 #define PRINT_THROUGHPUT_INTERVAL (25000)
 
+// Forward declaration of radio_log
+void radio_log(const char *format, ...);
+
+// Main logging using DMA logger
 #ifndef LOG
-#define LOG(f_, ...) printf((f_), ##__VA_ARGS__)
+#define LOG(f_, ...) radio_log((f_), ##__VA_ARGS__)
 #endif
 
 // Short message
@@ -324,12 +329,30 @@ static int32_t respCb(macRadioInterface_t *interface, macRadioPacket_t *packet, 
     return MAC_RADIO_CB_SUCCESS;
 }
 
+// Override the weak radio_log function to use DMA logger
+void radio_log(const char *format, ...) {
+    va_list args;
+    va_start(args, format);
+
+    char buffer[256];
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    loggerPrintf("%s", buffer);
+
+    va_end(args);
+}
+
 int main() {
     stdio_init_all(); // To be able to use printf
     // Initialize the gpio module to make sure all modules can use it
     halGpioInit();
     int rc = pico_led_init();
     hard_assert(rc == PICO_OK);
+
+    // Initialize the DMA-based non-blocking logger
+    if (loggerInit() != 0) {
+        // Fallback to USB stdio if logger fails
+        printf("Logger init failed!\n");
+    }
 
     // Initializ main parameters
     main_instance.packet_available = true;
@@ -445,6 +468,7 @@ int main() {
             LOG("D: %.1f Bps, P: %.1f%%\n", main_instance.ema_bitrate_bps, main_instance.radio_time_percentage);
             count = 0;
         }
+
         count++;
     }
 }

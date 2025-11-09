@@ -25,6 +25,8 @@ endif()
 # ====================================================================================
 set(PICO_BOARD pico2 CACHE STRING "Board type")
 
+include_directories(BEFORE logger)
+
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
@@ -100,7 +102,7 @@ add_subdirectory(${MODULE_PATH} libs/pi_pico_radio_mac)
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(radio_mac_auto_high_throughput radio_mac_auto_high_throughput.c )
+add_executable(radio_mac_auto_high_throughput radio_mac_auto_high_throughput.c logger/logger.c)
 
 pico_set_program_name(radio_mac_auto_high_throughput "radio_mac_auto_high_throughput")
 pico_set_program_version(radio_mac_auto_high_throughput "0.1")
@@ -130,6 +132,9 @@ target_include_directories(radio_mac_auto_high_throughput PRIVATE
 target_link_libraries(radio_mac_auto_high_throughput 
         hardware_spi
         hardware_pwm
+        hardware_uart
+        hardware_dma
+        hardware_irq
         rp2x_rfm69_lib
         c_buffer
         pi_pico_gpio_hal

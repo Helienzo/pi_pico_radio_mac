@@ -25,6 +25,8 @@ endif()
 # ====================================================================================
 set(PICO_BOARD pico2 CACHE STRING "Board type")
 
+include_directories(BEFORE logger)
+
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
@@ -100,13 +102,13 @@ add_subdirectory(${MODULE_PATH} libs/pi_pico_radio_mac)
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(radio_mac_auto_role radio_mac_auto_role.c )
+add_executable(radio_mac_auto_role radio_mac_auto_role.c logger/logger.c)
 
 pico_set_program_name(radio_mac_auto_role "radio_mac_auto_role")
 pico_set_program_version(radio_mac_auto_role "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(radio_mac_auto_role 1)
+pico_enable_stdio_uart(radio_mac_auto_role 0)
 pico_enable_stdio_usb(radio_mac_auto_role 1)
 
 # Add the standard library to the build
@@ -128,6 +130,9 @@ target_include_directories(radio_mac_auto_role PRIVATE
 target_link_libraries(radio_mac_auto_role 
         hardware_spi
         hardware_pwm
+        hardware_uart
+        hardware_dma
+        hardware_irq
         rp2x_rfm69_lib
         c_buffer
         pi_pico_gpio_hal
