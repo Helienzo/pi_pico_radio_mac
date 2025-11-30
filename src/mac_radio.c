@@ -221,25 +221,33 @@ static int32_t disconnectAndNotify(macRadio_t *inst, macRadioConnItem_t *connect
     if (connection->conn_state == MAC_RADIO_DISCONNECTED) {
         return MAC_RADIO_SUCCESS;
     }
-
-    connection->conn_state = MAC_RADIO_DISCONNECTED;
-
+ 
     // Clear the slot used by this connection
     int32_t res = clearSlotFromConfig(inst, connection->target_tx_slot);
     if (res != PHY_RADIO_SUCCESS) {
         return res;
     }
 
-    // Trigger connection Callback
-    macRadioConn_t new_connection = {
-        .conn_id = connection->target_addr,
-        .conn_state = MAC_RADIO_DISCONNECTED,
-    };
-
     // Re-Init the auto mode counter to a random value
     inst->auto_counter = (uint8_t)(rand() % MAC_RADIO_DEFAULT_NUM_BEACONS) + MAC_RADIO_MIN_NUM_BEACONS;
 
-    return inst->interface->conn_cb(inst->interface, new_connection);
+    // Only notify if we where actualy connected
+    if (connection->conn_state == MAC_RADIO_CONNECTED) {
+        // We must set this before we do call the callback
+        connection->conn_state = MAC_RADIO_DISCONNECTED;
+
+        // Trigger connection Callback
+        macRadioConn_t new_connection = {
+            .conn_id = connection->target_addr,
+            .conn_state = MAC_RADIO_DISCONNECTED,
+        };
+
+        return inst->interface->conn_cb(inst->interface, new_connection);
+    }
+
+    connection->conn_state = MAC_RADIO_DISCONNECTED;
+
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t connItemCb(staticMap_t *map, staticMapItem_t *map_item) {
@@ -335,7 +343,7 @@ static int32_t configureMySlots(macRadio_t *inst) {
     int32_t res = MAC_RADIO_SUCCESS;
 
     for (int i = 1; i < PHY_RADIO_NUM_SLOTS; i++) {
-        // Receive on slot 1 indefinetly
+        // Receive on slots indefinetly
         if ((res = phyRadioReceiveOnSlot(&inst->phy_instance, i)) != PHY_RADIO_SUCCESS) {
             LOG("RADIO SET MODE FAILED! %i\n", res);
             return res;
@@ -364,17 +372,29 @@ static int32_t manageSlotDataFromCentral(macRadio_t *inst, uint8_t slot_data, ma
     // Slot numbers are 1-indexed, bit positions are 0-indexed
     inst->slot_config_data[0] |= (1 << (central_slot - 1));
 
-    // Find first available slot (where bit is 0)
-    // __builtin_ctz counts trailing zeros, so invert the mask first
-    int available_bit = __builtin_ctz(~free_slots_mask);
+    // Find first available slot (where bit is 0), invert it for simplicity
+    free_slots_mask = ~free_slots_mask;
+    uint8_t free_slots[8] = {0};
 
-    // Check if the available slot is within valid range
-    if (available_bit < inst->current_config.num_data_slots) {
-        // Convert bit position to slot number (slots are 1-indexed)
-        inst->my_tx_slot = available_bit + 1;
+    // Loop and find all available slots
+    uint8_t slot_index = 0;
+    for (int32_t i = 0; i < inst->current_config.num_data_slots; i++) {
+        // The slot is free
+        if (free_slots_mask & (1 << i)) {
+            free_slots[slot_index++] = i;
+        }
+    }
+
+    // Check if any slots are available
+    if (slot_index != 0) {
+        // Randomly select a slot from available ones (if only 1, rand() % 1 == 0)
+        uint8_t slot_to_take = rand() % slot_index;
+
+        // Store the slot (slots are 1-indexed)
+        inst->my_tx_slot = free_slots[slot_to_take] + 1;
 
         // Mark this slot as occupied in our local mask
-        inst->slot_config_data[0] |= (1 << available_bit);
+        inst->slot_config_data[0] |= (1 << free_slots[slot_to_take]);
     } else {
         // No available slots
         return MAC_RADIO_NO_SLOTS;
@@ -433,6 +453,12 @@ static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncSta
         return res;
     }
 
+    res = InternalSendOnConnection(inst, MAC_RADIO_SYNC_ACK_PKT, 0, new_conn->target_addr);
+
+    if (res != MAC_RADIO_SUCCESS) {
+        return res;
+    }
+
     // Inform the phy layer to enter peripheral mode
     return PHY_RADIO_CB_SET_PERIPHERAL;
 }
@@ -440,15 +466,11 @@ static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncSta
 static int32_t managePeripheralReSync(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // Try to find the connection instance
     macRadioConnItem_t* conn = getConnection(&inst->connections, sync_state->central_address);
+
     // Check if this connection exists
     if (conn == NULL) {
-        return MAC_RADIO_NO_CONN_ERROR;
-    }
-
-    // Check if we are connecting, if so send a sync_ack
-    if (conn->conn_state == MAC_RADIO_CONNECTING) {
-        // Trigger a connect request
-        return InternalSendOnConnection(inst, MAC_RADIO_SYNC_ACK_PKT, 0, conn->target_addr);
+        // There is no active connection, try to create a new one!
+        return managePeripheralFirstSync(inst, sync_state);
     }
 
     // If we are connected send a keep alive, to notify the central that we exist
@@ -512,8 +534,8 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
     return PHY_RADIO_CB_SET_SCAN;
 }
 
-static int32_t manageInternalPackageTimeout(macRadio_t *inst, macRadioPacket_t *pkt) {
-    switch (pkt->pkt_type) {
+static int32_t manageInternalPackageTimeout(macRadio_t *inst, macRadioPacket_t *mac_pkt) {
+    switch (mac_pkt->pkt_type) {
         case MAC_RADIO_HANDOVER_PKT:
             LOG("Handover Timeout\n");
 #ifdef AUTO_SWITCH
@@ -522,10 +544,26 @@ static int32_t manageInternalPackageTimeout(macRadio_t *inst, macRadioPacket_t *
             // TODO This risks creating multiple centrals
 #endif
             break;
-        case MAC_RADIO_SYNC_ACK_PKT:
-            // Currently we risk getting stuck in CONNECTING state ..
-            // TODO manage this
-            break;
+        case MAC_RADIO_SYNC_ACK_PKT: {
+            // We go no response of last SYNC_ACK, trigger a disconnect
+            macRadioConnItem_t* conn = getConnection(&inst->connections, mac_pkt->conn_id);
+
+            // There is no active connection, then we are all good
+            if (conn == NULL) {
+                // TODO this would be a little weird
+                LOG("No conn on ttl SYNC_ACK!\n");
+                return MAC_RADIO_SUCCESS;
+            }
+
+            // Trigger a disconnect and cleanup
+            int32_t res = disconnectAndNotify(inst, conn);
+            if (res != MAC_RADIO_SUCCESS) {
+                return res;
+            }
+
+            // Delete the connection
+            return deleteConnection(&inst->connections, mac_pkt->conn_id);
+        } break;
         case MAC_RADIO_RELIABLE_PKT:
             break;
         default:
@@ -1224,7 +1262,7 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
         case MAC_RADIO_HANDOVER_PKT:
         case MAC_RADIO_SYNC_ACK_PKT:
             // This packet should be sent this frame
-            this_frame = true;
+            this_frame = false;
 
             // Keep track of this packet, wait for acknowlagement
             track_item = trackMacPacket(&inst->track_map, &buffer_item->mac_pkt, msg_id);
@@ -1235,7 +1273,10 @@ static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t p
             track_item->internal = true;
             break;
         case MAC_RADIO_ACK_PKT:
+            break;
         case MAC_RADIO_KEEP_ALIVE_PKT:
+            this_frame = true;
+            break;
         case MAC_RADIO_STREAM_PKT:
         case MAC_RADIO_CLOSE_PKT:
         case MAC_RADIO_BROADCAST_PKT:
