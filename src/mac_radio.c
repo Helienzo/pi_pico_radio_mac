@@ -63,7 +63,7 @@ __attribute__((weak)) void radio_log(const char *format, ...) {
 
 #define MAC_RADIO_DEFAULT_NUM_BEACONS     (8)
 #define MAC_RADIO_MIN_NUM_BEACONS         (2)
-#define MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS (10*5*8)
+#define MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS (10*7*8)
 #define MAC_RADIO_MIN_SCAN_TIMEOUT_MS     (5*5*8)
 
 static int32_t clearSlotFromConfig(macRadio_t *inst, uint8_t slot);
@@ -336,7 +336,7 @@ static int32_t manageCentralSyncSent(macRadio_t *inst, const phyRadioSyncState_t
 #endif
 
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
-    return PHY_RADIO_CB_SUCCESS;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t configureMySlots(macRadio_t *inst) {
@@ -460,7 +460,7 @@ static int32_t managePeripheralFirstSync(macRadio_t *inst, const phyRadioSyncSta
     }
 
     // Inform the phy layer to enter peripheral mode
-    return PHY_RADIO_CB_SET_PERIPHERAL;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t managePeripheralReSync(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
@@ -484,7 +484,7 @@ static int32_t managePeripheralReSync(macRadio_t *inst, const phyRadioSyncState_
     }
 
     // Inform the phy to stay in current mode
-    return PHY_RADIO_CB_SUCCESS;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t connItemDisconnectCb(staticMap_t *map, staticMapItem_t *map_item) {
@@ -522,7 +522,7 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
         if (res != PHY_RADIO_SUCCESS) {
             return res;
         }
-        return PHY_RADIO_CB_SUCCESS;
+        return MAC_RADIO_SUCCESS;
     }
 
 #ifdef MAC_RADIO_MODE_DBG_LED
@@ -530,8 +530,8 @@ static int32_t managePeripheralSyncLost(macRadio_t *inst, const phyRadioSyncStat
 #endif /* MAC_RADIO_MODE_DBG_LED */
 
     // TODO what happens if this callback comes when we are waiting for a reliable packet?
-    // Inform the phy layer to return to scan mode
-    return PHY_RADIO_CB_SET_SCAN;
+    // Trigger phy layer to return to scan mode
+    return phyRadioSetScanMode(&inst->phy_instance, MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS);
 }
 
 static int32_t manageInternalPackageTimeout(macRadio_t *inst, macRadioPacket_t *mac_pkt) {
@@ -626,7 +626,7 @@ static int32_t managePhyFrameStart(macRadio_t *inst, const phyRadioSyncState_t *
         return res;
     }
 
-    return PHY_RADIO_CB_SUCCESS;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t manageCentralConflictingSync(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
@@ -656,15 +656,23 @@ static int32_t manageCentralConflictingSync(macRadio_t *inst, const phyRadioSync
     gpio_put(MAC_RADIO_MODE_DBG_LED_PIN, false);
 #endif /* MAC_RADIO_MODE_DBG_LED */
 
-    // Inform phy to enter scan mode
-    return PHY_RADIO_CB_SET_SCAN;
+    // Enter scan mode
+    return phyRadioSetScanMode(&inst->phy_instance, MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS);
 }
 
 static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sync_state) {
     // Check what mode we are in
-    if (inst->mode != MAC_RADIO_AUTO_MODE) {
+    if (inst->mode == MAC_RADIO_PERIPHERAL) {
+        // Restart the scan
+        int32_t res = phyRadioSetScanMode(&inst->phy_instance, MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS);
+        if (res != PHY_RADIO_SUCCESS) {
+            return res;
+        }
+
+        return MAC_RADIO_SUCCESS;
+    } else if (inst->mode != MAC_RADIO_AUTO_MODE) {
         // Nothing more to do, just return
-        return PHY_RADIO_CB_SUCCESS;
+        return MAC_RADIO_SUCCESS;
     }
 
     // Re-Init the auto mode counter to a random value
@@ -693,7 +701,7 @@ static int32_t manageScanTimeout(macRadio_t *inst, const phyRadioSyncState_t *sy
         return res;
     }
 
-    return PHY_RADIO_CB_SUCCESS;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t phySyncStateCb(phyRadioInterface_t *interface, uint32_t sync_id, const phyRadioSyncState_t *sync_state) {
@@ -720,10 +728,10 @@ static int32_t phySyncStateCb(phyRadioInterface_t *interface, uint32_t sync_id, 
             return manageScanTimeout(inst, sync_state);
         default:
             // We should never end up here!
-            return PHY_RADIO_CB_ERROR_INVALID;
+            return MAC_RADIO_INVALID_ERROR;
     }
 
-    return PHY_RADIO_CB_SUCCESS;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *packet, phyRadioErr_t result) {
@@ -815,7 +823,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
 
     // If it is an internal package there is nothing more to do, return
     if (mac_interal) {
-        return PHY_RADIO_CB_SUCCESS;
+        return MAC_RADIO_SUCCESS;
     }
 
     // Notify that an external packet has been sent
@@ -825,7 +833,7 @@ static int32_t phyPacketSent(phyRadioInterface_t *interface, phyRadioPacket_t *p
         return cb_retval;
     }
 
-    return PHY_RADIO_CB_SUCCESS;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t manageAckPkt(macRadio_t * inst, uint32_t src_addr, macRadioPktTrackItem_t * track_item)  {
@@ -976,10 +984,11 @@ static int32_t manageClosePkt(macRadio_t * inst, macRadioPktTrackItem_t * track_
 #endif /* MAC_RADIO_MODE_DBG_LED */
 
             // Return the phy to scan mode
-            int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
+            int32_t res = phyRadioSetScanMode(&inst->phy_instance, MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS);
             if (res != PHY_RADIO_SUCCESS) {
                 return res;
             }
+
             LOG("Explicit disconnect requested\n");
         } break;
         case MAC_RADIO_AUTO_MODE: {
@@ -1030,7 +1039,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
 
     if (result < MAC_RADIO_OVERHEAD_SIZE) {
         LOG("Invalid packet received %i.\n", result);
-        return PHY_RADIO_CB_ERROR;
+        return MAC_RADIO_BUFFER_ERROR;
     }
 
     // Get the packet type
@@ -1207,7 +1216,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
                 return result; // Fatal error
             }
 
-            return PHY_RADIO_CB_SUCCESS;
+            return MAC_RADIO_SUCCESS;
     }
 
     if (cb_retval != MAC_RADIO_CB_SUCCESS) {
@@ -1221,7 +1230,7 @@ static int32_t phyPacketCallback(phyRadioInterface_t *interface, phyRadioPacket_
         conn->last_heard = 0;
     }
 
-    return PHY_RADIO_CB_SUCCESS;
+    return MAC_RADIO_SUCCESS;
 }
 
 static int32_t InternalSendOnConnection(macRadio_t *inst, macRadioPacketType_t packet_type, uint8_t use_msg_id, uint8_t target_addr) {
@@ -1593,7 +1602,7 @@ int32_t macRadioSetPeripheralMode(macRadio_t *inst) {
         inst->slot_config_data[i] = 0x00;
     }
 
-    int32_t res = phyRadioSetScanMode(&inst->phy_instance, 0);
+    int32_t res = phyRadioSetScanMode(&inst->phy_instance, MAC_RADIO_DEFAULT_SCAN_TIMEOUT_MS);
 
     if (res != PHY_RADIO_SUCCESS) {
         return res;
